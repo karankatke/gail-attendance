@@ -11,18 +11,16 @@ export function SetupScreen() {
             Create a free project at <span className="font-mono">supabase.com</span>.
           </li>
           <li>
-            Open <span className="font-semibold">SQL Editor</span> and run{" "}
-            <span className="font-mono">supabase/schema.sql</span> (then optionally{" "}
-            <span className="font-mono">seed.sql</span>).
+            Open <span className="font-semibold">SQL Editor</span> and apply the schema (tables,
+            policies, report functions), then seed the owner and supervisor profiles.
           </li>
           <li>
-            Under <span className="font-semibold">Authentication → Users</span>, add one user
-            (email + password). The password is your shared <span className="font-semibold">PIN</span>.
+            Deploy the <span className="font-mono">enroll</span> Edge Function (used to create
+            supervisor logins on first use).
           </li>
           <li>
             Copy <span className="font-mono">.env.example</span> to{" "}
-            <span className="font-mono">.env.local</span> and fill in the URL, anon key and that
-            email.
+            <span className="font-mono">.env.local</span> and fill in the URL and anon key.
           </li>
           <li>Restart the dev server (or redeploy).</li>
         </ol>

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Button, Card, Empty, Field, Modal, Spinner, inputClass } from "../components/ui";
 import { useTable } from "../hooks/useTable";
 import { insertRow, removeRow, updateRow } from "../lib/db";
-import { effectiveDayRate, effectiveHourRate, formatINR } from "../lib/pay";
+import { formatRate } from "../lib/pay";
 import type { RateMode, Role, Worker } from "../lib/types";
 
 export function WorkersPage() {
@@ -35,8 +35,6 @@ export function WorkersPage() {
         <div className="space-y-2">
           {sorted.map((w) => {
             const role = w.role_id ? roleById[w.role_id] : null;
-            const day = effectiveDayRate(w, role);
-            const hour = effectiveHourRate(w, role);
             return (
               <Card key={w.id} className="p-3">
                 <button onClick={() => setEditing(w)} className="flex w-full items-center justify-between text-left">
@@ -46,9 +44,7 @@ export function WorkersPage() {
                       {!w.active ? <span className="ml-2 text-xs font-normal text-slate-400">inactive</span> : null}
                     </p>
                     <p className="truncate text-xs text-slate-500">
-                      {role?.name ?? "No role"} ·{" "}
-                      {w.rate_mode === "hour" ? `${formatINR(hour)}/hr` : `${formatINR(day)}/day`}
-                      {w.day_rate != null || w.hour_rate != null ? " · custom" : ""}
+                      {role?.name ?? "No role"} · {formatRate(w, role)}
                     </p>
                   </div>
                   <span className="text-slate-300">›</span>
@@ -90,7 +86,7 @@ function WorkerForm({
   const [roleId, setRoleId] = useState(worker?.role_id ?? roles[0]?.id ?? "");
   const [rateMode, setRateMode] = useState<RateMode>(worker?.rate_mode ?? "day");
   const [dayRate, setDayRate] = useState(worker?.day_rate != null ? String(worker.day_rate) : "");
-  const [hourRate, setHourRate] = useState(worker?.hour_rate != null ? String(worker.hour_rate) : "");
+  const [monthRate, setMonthRate] = useState(worker?.month_rate != null ? String(worker.month_rate) : "");
   const [active, setActive] = useState(worker?.active ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +104,7 @@ function WorkerForm({
       role_id: roleId || null,
       rate_mode: rateMode,
       day_rate: dayRate.trim() === "" ? null : Number(dayRate),
-      hour_rate: hourRate.trim() === "" ? null : Number(hourRate),
+      month_rate: monthRate.trim() === "" ? null : Number(monthRate),
       active,
     };
     try {
@@ -157,7 +153,7 @@ function WorkerForm({
 
         <Field label="Pay basis">
           <div className="grid grid-cols-2 gap-1.5">
-            {(["day", "hour"] as RateMode[]).map((m) => (
+            {(["day", "month"] as RateMode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setRateMode(m)}
@@ -165,20 +161,21 @@ function WorkerForm({
                   rateMode === m ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"
                 }`}
               >
-                {m === "day" ? "Per day" : "Per hour"}
+                {m === "day" ? "Per day" : "Per month"}
               </button>
             ))}
           </div>
         </Field>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Day rate override" hint="blank = use role">
+        {rateMode === "day" ? (
+          <Field label="Day rate override (₹)" hint="blank = use the role's day rate">
             <input inputMode="decimal" value={dayRate} onChange={(e) => setDayRate(e.target.value)} className={inputClass} placeholder="—" />
           </Field>
-          <Field label="Hour rate override" hint="blank = use role">
-            <input inputMode="decimal" value={hourRate} onChange={(e) => setHourRate(e.target.value)} className={inputClass} placeholder="—" />
+        ) : (
+          <Field label="Month rate override (₹)" hint="blank = use the role's month rate">
+            <input inputMode="decimal" value={monthRate} onChange={(e) => setMonthRate(e.target.value)} className={inputClass} placeholder="—" />
           </Field>
-        </div>
+        )}
 
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="h-4 w-4" />

@@ -1,18 +1,91 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Card, Field, Modal, Spinner, inputClass } from "../components/ui";
 import { useTable } from "../hooks/useTable";
-import { insertRow, removeRow, updateRow } from "../lib/db";
+import { approveAccess, insertRow, rejectAccess, removeRow, updateRow } from "../lib/db";
 import { useAuth } from "../context/AuthContext";
 import { formatINR } from "../lib/pay";
-import type { Role } from "../lib/types";
+import type { Profile, Role } from "../lib/types";
+
+const STATUS_LABEL: Record<string, string> = {
+  unclaimed: "Not set up",
+  pending: "Requested access",
+  approved: "Approved — setting PIN",
+  active: "Active",
+};
 
 export function SettingsPage() {
   const { rows: roles, loading, refetch } = useTable<Role>("roles", { orderColumn: "name" });
-  const { signOut } = useAuth();
+  const { rows: profiles, refetch: refetchProfiles } = useTable<Profile>("profiles", {
+    orderColumn: "display_name",
+  });
+  const { signOut, profile: me } = useAuth();
   const [editing, setEditing] = useState<Role | "new" | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const team = useMemo(
+    () => profiles.filter((p) => p.role === "supervisor" && p.active),
+    [profiles],
+  );
+
+  const act = async (id: string, fn: (id: string) => Promise<void>) => {
+    setBusyId(id);
+    try {
+      await fn(id);
+      await refetchProfiles();
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <div className="space-y-4">
+      <div>
+        <p className="mb-2 px-1 text-sm font-medium text-slate-500">Supervisors & access</p>
+        <div className="space-y-2">
+          {team.length === 0 ? (
+            <Card className="p-4 text-sm text-slate-500">No supervisors yet.</Card>
+          ) : (
+            team.map((p) => (
+              <Card key={p.id} className="p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-900">{p.display_name}</p>
+                    <p className="text-xs text-slate-500">{STATUS_LABEL[p.status] ?? p.status}</p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    {p.status === "pending" ? (
+                      <>
+                        <Button
+                          onClick={() => act(p.id, approveAccess)}
+                          disabled={busyId === p.id}
+                          className="px-3 py-1.5 text-xs"
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => act(p.id, rejectAccess)}
+                          disabled={busyId === p.id}
+                          className="px-3 py-1.5 text-xs"
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    ) : p.status === "active" ? (
+                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                        Active
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">—</span>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            ))
+          )}
+        </div>
+      </div>
+
       <div>
         <p className="mb-2 px-1 text-sm font-medium text-slate-500">Roles & base rates</p>
         <div className="space-y-2">
@@ -28,7 +101,7 @@ export function SettingsPage() {
                       {!r.active ? <span className="ml-2 text-xs font-normal text-slate-400">inactive</span> : null}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {formatINR(Number(r.day_rate))}/day · {formatINR(Number(r.hour_rate))}/hr
+                      {formatINR(Number(r.day_rate))}/day · {formatINR(Number(r.month_rate))}/month
                     </p>
                   </div>
                   <span className="text-slate-300">›</span>
@@ -43,17 +116,18 @@ export function SettingsPage() {
       </div>
 
       <Card className="p-4">
-        <p className="text-sm font-semibold text-slate-900">Shared access</p>
+        <p className="text-sm font-semibold text-slate-900">
+          Signed in as {me?.display_name ?? "owner"}
+        </p>
         <p className="mt-1 text-xs text-slate-500">
-          Everyone signs in with the same link and PIN. You stay signed in on each phone. To change the
-          PIN, update the password of the shared Supabase user.
+          Each person signs in with their own PIN. Supervisors only see attendance and bata.
         </p>
         <Button variant="danger" onClick={signOut} className="mt-3 w-full">
           Sign out on this phone
         </Button>
       </Card>
 
-      <p className="pb-2 text-center text-[11px] text-slate-400">Attendance Register · v1.0</p>
+      <p className="pb-2 text-center text-[11px] text-slate-400">Attendance Register · v2.0</p>
 
       {editing ? (
         <RoleForm
@@ -80,7 +154,7 @@ function RoleForm({
 }) {
   const [name, setName] = useState(role?.name ?? "");
   const [dayRate, setDayRate] = useState(role ? String(role.day_rate) : "");
-  const [hourRate, setHourRate] = useState(role ? String(role.hour_rate) : "");
+  const [monthRate, setMonthRate] = useState(role ? String(role.month_rate) : "");
   const [active, setActive] = useState(role?.active ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +169,7 @@ function RoleForm({
     const payload = {
       name: name.trim(),
       day_rate: dayRate.trim() === "" ? 0 : Number(dayRate),
-      hour_rate: hourRate.trim() === "" ? 0 : Number(hourRate),
+      month_rate: monthRate.trim() === "" ? 0 : Number(monthRate),
       active,
     };
     try {
@@ -130,8 +204,8 @@ function RoleForm({
           <Field label="Day rate (₹)">
             <input inputMode="decimal" value={dayRate} onChange={(e) => setDayRate(e.target.value)} className={inputClass} placeholder="0" />
           </Field>
-          <Field label="Hour rate (₹)">
-            <input inputMode="decimal" value={hourRate} onChange={(e) => setHourRate(e.target.value)} className={inputClass} placeholder="0" />
+          <Field label="Month rate (₹)">
+            <input inputMode="decimal" value={monthRate} onChange={(e) => setMonthRate(e.target.value)} className={inputClass} placeholder="0" />
           </Field>
         </div>
         <label className="flex items-center gap-2">
