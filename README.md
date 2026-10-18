@@ -10,12 +10,17 @@ No app to install — it's just a website; add it to the home screen if you like
 
 ## Features
 - Supervisors mark **Full / Half / Absent** for any worker at any site (including themselves).
+- One entry per worker per day: once marked, a worker leaves the "to mark" list and can't be
+  re-tagged at another site. The day's entries show **who marked them**; only that person can undo
+  their own entry. Supervisors never mark each other.
+- Supervisors can **add a worker** (name + role only) when someone new shows up on site; the owner is
+  prompted to set that worker's rate, and the worker shows **who added them**.
 - Day-rate **and** month-rate workers; rates per work type (role) with per-worker overrides.
 - **Bata**: owner hands cash to a supervisor; the supervisor records the breakdown (lunch, travel/tempo,
   material, other) and the owner sees it in reports as a separate "misc" line.
 - **Reports**: live current week, a week list with tap-to-view summaries, and a monthly view that
   includes monthly-salaried workers. Advances / deductions / bonuses are editable from a list.
-- Owner home shows a read-only per-site headcount for the day.
+- Owner home shows a read-only per-site headcount for the day with the marker's name.
 - Live sync across all phones via Supabase Realtime.
 
 Stack: React + Vite + TypeScript + Tailwind, Supabase (Postgres + Auth + RLS + Realtime + Edge Functions),

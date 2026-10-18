@@ -4,6 +4,7 @@ import { useTable } from "../hooks/useTable";
 import { approveAccess, insertRow, rejectAccess, removeRow, updateRow } from "../lib/db";
 import { useAuth } from "../context/AuthContext";
 import { formatINR } from "../lib/pay";
+import { timeAgo } from "../lib/dates";
 import type { Profile, Role } from "../lib/types";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -50,7 +51,10 @@ export function SettingsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-slate-900">{p.display_name}</p>
-                    <p className="text-xs text-slate-500">{STATUS_LABEL[p.status] ?? p.status}</p>
+                    <p className="text-xs text-slate-500">
+                      {STATUS_LABEL[p.status] ?? p.status}
+                      {p.status === "active" ? ` · active ${timeAgo(p.last_seen_at)}` : ""}
+                    </p>
                   </div>
                   <div className="flex shrink-0 gap-2">
                     {p.status === "pending" ? (

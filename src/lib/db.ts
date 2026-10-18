@@ -2,8 +2,10 @@ import { requireClient } from "./supabase";
 import type {
   Attendance,
   AttendanceStatus,
+  DayAttendanceRow,
   LoginEntry,
   Profile,
+  PublicRole,
   PublicWorker,
 } from "./types";
 
@@ -88,6 +90,32 @@ export async function fetchPublicWorkers(): Promise<PublicWorker[]> {
   const { data, error } = await client.rpc("public_workers");
   if (error) throw error;
   return (data ?? []) as PublicWorker[];
+}
+
+export async function fetchPublicRoles(): Promise<PublicRole[]> {
+  const client = requireClient();
+  const { data, error } = await client.rpc("public_roles");
+  if (error) throw error;
+  return (data ?? []) as PublicRole[];
+}
+
+export async function fetchDayAttendance(date: string): Promise<DayAttendanceRow[]> {
+  const client = requireClient();
+  const { data, error } = await client.rpc("day_attendance", { p_date: date });
+  if (error) throw error;
+  return (data ?? []) as DayAttendanceRow[];
+}
+
+/** Supervisor adds a worker (name + role only; the owner sets the rate later). */
+export async function addWorker(name: string, roleId: string | null): Promise<void> {
+  const client = requireClient();
+  const { error } = await client.rpc("add_worker", { p_name: name, p_role_id: roleId });
+  if (error) throw error;
+}
+
+export async function touchSeen(): Promise<void> {
+  const client = requireClient();
+  await client.rpc("touch_seen");
 }
 
 /** Read the signed-in user's own profile row (allowed by `profiles_self_read`). */

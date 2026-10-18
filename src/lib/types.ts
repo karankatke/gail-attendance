@@ -31,6 +31,9 @@ export interface Worker {
   day_rate: number | null;
   month_rate: number | null;
   active: boolean;
+  added_by_profile_id: string | null;
+  added_at: string | null;
+  needs_rate: boolean;
   created_at: string;
 }
 
@@ -80,6 +83,7 @@ export interface Profile {
   created_at: string;
   requested_at: string | null;
   approved_at: string | null;
+  last_seen_at: string | null;
 }
 
 export interface LoginEntry {
@@ -118,6 +122,25 @@ export interface PublicWorker {
   role_id: string | null;
   role_name: string | null;
   active: boolean;
+  supervisor_profile_id: string | null;
+}
+
+export interface PublicRole {
+  id: string;
+  name: string;
+}
+
+export interface DayAttendanceRow {
+  worker_id: string;
+  worker_name: string;
+  role_name: string | null;
+  status: AttendanceStatus;
+  location_id: string | null;
+  location_name: string | null;
+  marked_by_profile_id: string | null;
+  marked_by_name: string | null;
+  note: string | null;
+  updated_at: string;
 }
 
 export interface ReportRow {

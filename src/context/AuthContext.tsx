@@ -9,7 +9,7 @@ import {
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
-import { fetchMyProfile } from "../lib/db";
+import { fetchMyProfile, touchSeen } from "../lib/db";
 import { padPin } from "../lib/pay";
 import type { Profile } from "../lib/types";
 
@@ -39,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const p = await fetchMyProfile(s.user.id);
       setProfile(p);
+      if (p) void touchSeen();
     } catch {
       setProfile(null);
     }

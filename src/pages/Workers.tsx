@@ -3,11 +3,14 @@ import { Button, Card, Empty, Field, Modal, Spinner, inputClass } from "../compo
 import { useTable } from "../hooks/useTable";
 import { insertRow, removeRow, updateRow } from "../lib/db";
 import { formatRate } from "../lib/pay";
-import type { RateMode, Role, Worker } from "../lib/types";
+import type { Profile, RateMode, Role, Worker } from "../lib/types";
 
 export function WorkersPage() {
   const { rows: workers, loading, refetch } = useTable<Worker>("workers", { orderColumn: "name" });
   const { rows: roles } = useTable<Role>("roles", { orderColumn: "name" });
+  const { rows: profiles, refetch: refetchProfiles } = useTable<Profile>("profiles", {
+    orderColumn: "display_name",
+  });
   const [editing, setEditing] = useState<Worker | "new" | null>(null);
 
   const roleById = useMemo(() => {
@@ -16,13 +19,57 @@ export function WorkersPage() {
     return m;
   }, [roles]);
 
+  const addedByName = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const p of profiles) m[p.id] = p.display_name;
+    return m;
+  }, [profiles]);
+
   const sorted = useMemo(
     () => [...workers].sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)),
     [workers],
   );
 
+  const needsRate = useMemo(() => sorted.filter((w) => w.active && w.needs_rate), [sorted]);
+
+  const onSaved = async () => {
+    setEditing(null);
+    await refetch();
+    await refetchProfiles();
+  };
+
   return (
     <div className="space-y-4">
+      {needsRate.length > 0 ? (
+        <div>
+          <p className="mb-2 px-1 text-sm font-medium text-amber-700">
+            New workers — set their rate ({needsRate.length})
+          </p>
+          <div className="space-y-2">
+            {needsRate.map((w) => {
+              const role = w.role_id ? roleById[w.role_id] : null;
+              const by = w.added_by_profile_id ? addedByName[w.added_by_profile_id] : null;
+              return (
+                <Card key={w.id} className="border-amber-200 p-3 ring-amber-100">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-900">{w.name}</p>
+                      <p className="truncate text-xs text-slate-500">
+                        {role?.name ?? "No role"}
+                        {by ? ` · added by ${by}` : ""}
+                      </p>
+                    </div>
+                    <Button onClick={() => setEditing(w)} className="shrink-0 px-3 py-1.5 text-xs">
+                      Set rate
+                    </Button>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
       <Button onClick={() => setEditing("new")} className="w-full">
         + Add worker
       </Button>
@@ -35,6 +82,7 @@ export function WorkersPage() {
         <div className="space-y-2">
           {sorted.map((w) => {
             const role = w.role_id ? roleById[w.role_id] : null;
+            const by = w.added_by_profile_id ? addedByName[w.added_by_profile_id] : null;
             return (
               <Card key={w.id} className="p-3">
                 <button onClick={() => setEditing(w)} className="flex w-full items-center justify-between text-left">
@@ -42,9 +90,15 @@ export function WorkersPage() {
                     <p className="truncate font-semibold text-slate-900">
                       {w.name}
                       {!w.active ? <span className="ml-2 text-xs font-normal text-slate-400">inactive</span> : null}
+                      {w.needs_rate ? (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                          needs rate
+                        </span>
+                      ) : null}
                     </p>
                     <p className="truncate text-xs text-slate-500">
                       {role?.name ?? "No role"} · {formatRate(w, role)}
+                      {by ? ` · added by ${by}` : ""}
                     </p>
                   </div>
                   <span className="text-slate-300">›</span>
@@ -60,10 +114,7 @@ export function WorkersPage() {
           worker={editing === "new" ? null : editing}
           roles={roles}
           onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null);
-            await refetch();
-          }}
+          onSaved={onSaved}
         />
       ) : null}
     </div>
@@ -106,6 +157,7 @@ function WorkerForm({
       day_rate: dayRate.trim() === "" ? null : Number(dayRate),
       month_rate: monthRate.trim() === "" ? null : Number(monthRate),
       active,
+      needs_rate: false,
     };
     try {
       if (worker) await updateRow("workers", worker.id, payload);
@@ -132,6 +184,13 @@ function WorkerForm({
   return (
     <Modal title={worker ? "Edit worker" : "Add worker"} onClose={onClose}>
       <div className="space-y-4">
+        {worker?.needs_rate ? (
+          <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+            {worker.added_by_profile_id ? "Added by a supervisor. " : ""}
+            Set the pay basis and rate below, then save.
+          </p>
+        ) : null}
+
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="Worker name" />
         </Field>
