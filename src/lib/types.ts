@@ -178,3 +178,47 @@ export interface BataReportRow {
   material: number;
   other: number;
 }
+
+export type MeterStatus = "draft" | "done";
+export type MeterPhotoKind = "meter" | "valve";
+
+export interface SiteFlat {
+  id: string;
+  location_id: string;
+  flat_number: string;
+  flat_key: string;
+  tower: string | null;
+  floor: number | null;
+  bp_number: string | null;
+  application_no: string | null;
+  consumer_name: string | null;
+  society: string | null;
+  ga_status: string | null;
+  sd_available: number | null;
+  sl_no: number | null;
+  source: "import" | "manual";
+  active: boolean;
+  created_by_profile_id: string | null;
+  created_at: string;
+}
+
+export interface MeterRecord {
+  id: string;
+  site_flat_id: string;
+  location_id: string;
+  meter_reading: number | null;
+  meter_make: string | null;
+  work_date: string;
+  remarks: string | null;
+  meter_photo_path: string | null;
+  valve_photo_path: string | null;
+  status: MeterStatus;
+  created_by_profile_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MeterFlatRow {
+  flat: SiteFlat;
+  record: MeterRecord | null;
+}

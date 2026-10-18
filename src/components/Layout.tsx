@@ -23,18 +23,23 @@ const MORE_ICON = (
 const BATA_ICON = (
   <path d="M3 7h18v12H3zM3 7l2-4h14l2 4M9 13h6" />
 );
+const METER_ICON = (
+  <path d="M12 21a8 8 0 108-8M12 13l3-3M4 8h4M4 12h3M5 16h3" />
+);
 
 export const OWNER_TABS: NavTab[] = [
   { id: "home", label: "Home", icon: HOME_ICON },
   { id: "workers", label: "Workers", icon: WORKERS_ICON },
   { id: "sites", label: "Sites", icon: SITES_ICON },
   { id: "reports", label: "Reports", icon: REPORTS_ICON },
+  { id: "meters", label: "Meters", icon: METER_ICON },
   { id: "settings", label: "More", icon: MORE_ICON },
 ];
 
 export const SUPERVISOR_TABS: NavTab[] = [
   { id: "attendance", label: "Attendance", icon: TODAY_ICON },
   { id: "bata", label: "Bata", icon: BATA_ICON },
+  { id: "meter", label: "Meter", icon: METER_ICON },
 ];
 
 export function Layout({

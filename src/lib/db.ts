@@ -4,9 +4,12 @@ import type {
   AttendanceStatus,
   DayAttendanceRow,
   LoginEntry,
+  MeterRecord,
+  MeterStatus,
   Profile,
   PublicRole,
   PublicWorker,
+  SiteFlat,
 } from "./types";
 
 export interface AttendanceInput {
@@ -145,4 +148,51 @@ export async function enroll(profileId: string, pin: string): Promise<{ email: s
     throw new Error(payload?.error ?? "Enrollment failed");
   }
   return { email: payload.email };
+}
+
+/* ------------------------------------------------------------------ */
+/* Meter details                                                       */
+/* ------------------------------------------------------------------ */
+
+/** Insert or update the single meter record for a flat. */
+export async function saveMeterRecord(input: {
+  site_flat_id: string;
+  location_id: string;
+  meter_reading: number | null;
+  meter_make: string | null;
+  work_date: string;
+  remarks: string | null;
+  meter_photo_path: string;
+  valve_photo_path: string;
+  status: MeterStatus;
+  created_by_profile_id: string | null;
+}): Promise<MeterRecord | null> {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("meter_records")
+    .upsert(input, { onConflict: "site_flat_id" })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as MeterRecord;
+}
+
+/** Supervisor adds a flat that isn't in the imported list. */
+export async function addSiteFlat(input: {
+  location_id: string;
+  flat_number: string;
+  flat_key: string;
+  tower: string | null;
+  floor: number | null;
+  bp_number: string | null;
+  created_by_profile_id: string;
+}): Promise<SiteFlat | null> {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("site_flats")
+    .insert({ ...input, source: "manual" })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as SiteFlat;
 }

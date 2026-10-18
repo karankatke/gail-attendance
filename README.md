@@ -21,6 +21,11 @@ No app to install — it's just a website; add it to the home screen if you like
 - **Reports**: live current week, a week list with tap-to-view summaries, and a monthly view that
   includes monthly-salaried workers. Advances / deductions / bonuses are editable from a list.
 - Owner home shows a read-only per-site headcount for the day with the marker's name.
+- **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the meter reading,
+  meter make, work date, remarks and two on-site photos (meter, valve/regulator), see a
+  done/pending progress bar, and download a per-flat PDF. The owner sees per-site progress and can
+  download a **combined PDF** of all recorded flats for a site. Photos are downscaled on the phone
+  before upload.
 - Live sync across all phones via Supabase Realtime.
 
 Stack: React + Vite + TypeScript + Tailwind, Supabase (Postgres + Auth + RLS + Realtime + Edge Functions),
@@ -119,10 +124,17 @@ Table | Purpose
 `profiles` | Owner and supervisor accounts
 `bata_grants` | Cash given to a supervisor
 `bata_expenses` | What a supervisor spent
+`site_flats` | Master flat list per site (BP number, consumer, tower/floor)
+`meter_records` | One meter record per flat (reading, make, photos, status)
 
 Report functions: `report_range(from,to,include_monthly)`, `report_by_location(from,to)`,
 `report_bata(from,to)`. Access helpers: `login_directory()`, `request_access`, `approve_access`,
 `reject_access`, `public_workers()`, `is_owner()`, `current_profile_id()`.
+
+### Meter photos
+Private Supabase Storage bucket `meter-photos`, paths `{location}/{flat}/meter.jpg` and `.../valve.jpg`.
+Images are resized on the device (max 1600px, JPEG) before upload; the app reads them back through
+short-lived signed URLs.
 
 ## Security notes
 - Row Level Security is on for every table. Supervisors can read locations and attendance and write

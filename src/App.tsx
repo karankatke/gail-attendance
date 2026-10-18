@@ -12,18 +12,22 @@ import { ReportsPage } from "./pages/Reports";
 import { SettingsPage } from "./pages/Settings";
 import { SupervisorAttendancePage } from "./pages/SupervisorAttendance";
 import { BataPage } from "./pages/Bata";
+import { MeterDetailsPage } from "./pages/MeterDetails";
+import { MetersPage } from "./pages/Meters";
 
 const OWNER_TITLES: Record<string, { title: string; subtitle?: string }> = {
   home: { title: "Home", subtitle: "Today at a glance" },
   workers: { title: "Workers", subtitle: "People and their rates" },
   sites: { title: "Sites", subtitle: "Where work happens" },
   reports: { title: "Reports", subtitle: "Wages, payments & bata" },
+  meters: { title: "Meter details", subtitle: "Gas meter records per site" },
   settings: { title: "More", subtitle: "Roles, access, settings" },
 };
 
 const SUPERVISOR_TITLES: Record<string, { title: string; subtitle?: string }> = {
   attendance: { title: "Attendance", subtitle: "Mark who worked, where" },
   bata: { title: "Bata", subtitle: "Cash given and spent" },
+  meter: { title: "Meter details", subtitle: "Record gas meter per flat" },
 };
 
 function OwnerApp() {
@@ -35,6 +39,7 @@ function OwnerApp() {
       {tab === "workers" ? <WorkersPage /> : null}
       {tab === "sites" ? <SitesPage /> : null}
       {tab === "reports" ? <ReportsPage /> : null}
+      {tab === "meters" ? <MetersPage /> : null}
       {tab === "settings" ? <SettingsPage /> : null}
     </Layout>
   );
@@ -47,6 +52,7 @@ function SupervisorApp() {
     <Layout tabs={SUPERVISOR_TABS} tab={tab} onTab={setTab} title={meta.title} subtitle={meta.subtitle}>
       {tab === "attendance" ? <SupervisorAttendancePage /> : null}
       {tab === "bata" ? <BataPage /> : null}
+      {tab === "meter" ? <MeterDetailsPage /> : null}
     </Layout>
   );
 }
