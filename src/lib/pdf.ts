@@ -81,6 +81,7 @@ function fieldRows(siteName: string, flat: SiteFlat, rec: MeterRecord): [string,
     ["BP number", flat.bp_number ?? "—"],
     ["Application no.", flat.application_no ?? "—"],
     ["Meter reading", rec.meter_reading != null ? String(rec.meter_reading) : "—"],
+    ["Initial meter reading", rec.initial_meter_reading != null ? String(rec.initial_meter_reading) : "—"],
     ["Meter make", rec.meter_make ?? "—"],
     ["Work date", prettyDate(rec.work_date)],
   ];

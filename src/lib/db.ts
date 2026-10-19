@@ -159,6 +159,7 @@ export async function saveMeterRecord(input: {
   site_flat_id: string;
   location_id: string;
   meter_reading: number | null;
+  initial_meter_reading: number | null;
   meter_make: string | null;
   work_date: string;
   remarks: string | null;

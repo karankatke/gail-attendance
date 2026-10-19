@@ -105,6 +105,7 @@ export function isRecordComplete(rec: MeterRecord | null): boolean {
   return (
     !!rec &&
     rec.meter_reading != null &&
+    rec.initial_meter_reading != null &&
     !!rec.meter_make?.trim() &&
     !!rec.meter_photo_path &&
     !!rec.valve_photo_path

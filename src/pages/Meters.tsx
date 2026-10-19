@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, Empty, Spinner } from "../components/ui";
+import { Button, Card, Empty, Modal, Spinner } from "../components/ui";
 import { useTable } from "../hooks/useTable";
 import { flatSort, meterPhotoUrl } from "../lib/meters";
 import { buildFlatPdf, buildSitePdf, pdfFileName, sharePdf } from "../lib/pdf";
@@ -172,6 +172,7 @@ function SiteMeters({
 function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
   const [thumb, setThumb] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const done = row.record?.status === "done";
 
   useEffect(() => {
@@ -196,36 +197,172 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
   };
 
   return (
-    <Card className="flex items-center gap-3 p-3">
-      <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-slate-100">
-        {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : null}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold text-slate-900">
-          {row.flat.flat_number}
-          {row.flat.consumer_name ? (
-            <span className="ml-2 text-sm font-normal text-slate-500">{row.flat.consumer_name}</span>
-          ) : null}
-        </p>
-        <p className="truncate text-xs text-slate-500">
-          {done && row.record
-            ? `Reading ${row.record.meter_reading ?? "—"} · ${row.record.meter_make ?? "—"}`
-            : `BP ${row.flat.bp_number ?? "—"} · pending`}
-        </p>
-      </div>
+    <Card className="flex items-center gap-3 p-2.5">
+      <button onClick={() => setOpen(true)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-[10px] text-slate-400">
+          {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : done ? "…" : "—"}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-slate-900">
+            {row.flat.flat_number}
+            {row.flat.consumer_name ? (
+              <span className="ml-2 text-sm font-normal text-slate-500">{row.flat.consumer_name}</span>
+            ) : null}
+          </p>
+          <p className="truncate text-xs text-slate-500">
+            {done && row.record
+              ? `Reading ${row.record.meter_reading ?? "—"} · ${row.record.meter_make ?? "—"}`
+              : `BP ${row.flat.bp_number ?? "—"} · pending`}
+          </p>
+        </div>
+      </button>
       {done ? (
-        <button
-          onClick={pdf}
-          disabled={busy}
-          className="shrink-0 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
-        >
-          {busy ? "…" : "PDF"}
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            onClick={() => setOpen(true)}
+            className="rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-semibold text-brand-700 active:bg-brand-100"
+          >
+            View
+          </button>
+          <button
+            onClick={pdf}
+            disabled={busy}
+            className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
+          >
+            {busy ? "…" : "PDF"}
+          </button>
+        </div>
       ) : (
         <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
           Pending
         </span>
       )}
+
+      {open ? <MeterViewer siteName={siteName} row={row} onClose={() => setOpen(false)} /> : null}
     </Card>
+  );
+}
+
+function MeterViewer({
+  siteName,
+  row,
+  onClose,
+}: {
+  siteName: string;
+  row: MeterFlatRow;
+  onClose: () => void;
+}) {
+  const rec = row.record;
+  const [meter, setMeter] = useState<string | null>(null);
+  const [valve, setValve] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [zoom, setZoom] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([meterPhotoUrl(rec?.meter_photo_path ?? null), meterPhotoUrl(rec?.valve_photo_path ?? null)]).then(
+      ([m, v]) => {
+        if (cancelled) return;
+        setMeter(m);
+        setValve(v);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [rec?.meter_photo_path, rec?.valve_photo_path]);
+
+  const pdf = async () => {
+    if (!rec) return;
+    setBusy(true);
+    try {
+      const doc = await buildFlatPdf(siteName, row.flat, rec);
+      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={`Flat ${row.flat.flat_number}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="rounded-xl bg-slate-50 p-3 text-sm">
+          <InfoRow label="Site" value={siteName} />
+          <InfoRow label="Consumer" value={row.flat.consumer_name ?? "—"} />
+          <InfoRow label="BP number" value={row.flat.bp_number ?? "—"} />
+          <InfoRow label="Application no." value={row.flat.application_no ?? "—"} />
+          <InfoRow label="Tower / floor" value={`${row.flat.tower ?? "—"} · ${row.flat.floor ?? "—"}`} />
+        </div>
+
+        {rec ? (
+          <>
+            <div className="rounded-xl bg-brand-50 p-3 text-sm">
+              <InfoRow label="Meter reading" value={rec.meter_reading != null ? String(rec.meter_reading) : "—"} strong />
+              <InfoRow
+                label="Initial meter reading"
+                value={rec.initial_meter_reading != null ? String(rec.initial_meter_reading) : "—"}
+              />
+              <InfoRow label="Meter make" value={rec.meter_make ?? "—"} />
+              <InfoRow label="Work date" value={rec.work_date} />
+              {rec.remarks ? <InfoRow label="Remarks" value={rec.remarks} /> : null}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <PhotoTile label="Meter photo" url={meter} onZoom={setZoom} />
+              <PhotoTile label="Valve / regulator" url={valve} onZoom={setZoom} />
+            </div>
+
+            <Button onClick={pdf} disabled={busy} className="w-full">
+              {busy ? "Building…" : "Download PDF"}
+            </Button>
+          </>
+        ) : (
+          <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+            Not recorded yet — the supervisor hasn't added meter details for this flat.
+          </p>
+        )}
+      </div>
+
+      {zoom ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setZoom(null)}
+        >
+          <img src={zoom} alt="" className="max-h-full max-w-full rounded-xl object-contain" />
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+function InfoRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="flex justify-between gap-3 py-0.5">
+      <span className="text-slate-500">{label}</span>
+      <span className={strong ? "font-bold text-slate-900" : "font-medium text-slate-800"}>{value}</span>
+    </div>
+  );
+}
+
+function PhotoTile({
+  label,
+  url,
+  onZoom,
+}: {
+  label: string;
+  url: string | null;
+  onZoom: (u: string) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-medium text-slate-500">{label}</p>
+      <button
+        type="button"
+        onClick={() => (url ? onZoom(url) : undefined)}
+        className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-[11px] text-slate-400"
+      >
+        {url ? <img src={url} alt={label} className="h-full w-full object-cover" /> : "No photo"}
+      </button>
+    </div>
   );
 }

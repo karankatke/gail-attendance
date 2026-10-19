@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Empty, Field, Modal, Spinner, inputClass } from "../components/ui";
 import { useTable } from "../hooks/useTable";
 import { useAuth } from "../context/AuthContext";
@@ -188,45 +188,81 @@ function PhotoField({
   onChange: (v: { blob: Blob; url: string } | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handle = async (file: File | null | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      onChange(await compressPreview(file));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Field label={label}>
-      <div className="flex items-center gap-3">
-        <label className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-dashed border-slate-300 bg-slate-50 text-center text-[11px] text-slate-500">
+      <div className="flex items-start gap-3">
+        <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-dashed border-slate-300 bg-slate-50 text-center text-[11px] text-slate-500">
           {preview ? (
             <img src={preview} alt={label} className="h-full w-full object-cover" />
           ) : busy ? (
-            "Compressing…"
+            "Working…"
           ) : (
-            "Take photo"
+            "No photo"
           )}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="absolute inset-0 opacity-0"
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              setBusy(true);
-              try {
-                onChange(await compressPreview(file));
-              } finally {
-                setBusy(false);
-                e.target.value = "";
-              }
-            }}
-          />
-        </label>
-        {preview ? (
+        </div>
+        <div className="flex flex-1 flex-col gap-1.5">
           <button
-            onClick={() => onChange(null)}
-            className="rounded-lg px-2 py-1 text-xs font-semibold text-red-600 active:bg-red-50"
+            type="button"
+            onClick={() => cameraRef.current?.click()}
+            disabled={busy}
+            className="rounded-xl bg-brand-700 px-3 py-2 text-xs font-semibold text-white active:bg-brand-800 disabled:opacity-40"
           >
-            Remove
+            Take photo
           </button>
-        ) : (
-          <span className="text-xs text-slate-400">Required</span>
-        )}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
+          >
+            Upload
+          </button>
+          {preview ? (
+            <button
+              type="button"
+              onClick={() => onChange(null)}
+              className="px-1 text-left text-xs font-semibold text-red-600 active:text-red-700"
+            >
+              Remove
+            </button>
+          ) : (
+            <span className="px-1 text-[11px] text-slate-400">Required</span>
+          )}
+        </div>
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            handle(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            handle(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
       </div>
     </Field>
   );
@@ -248,6 +284,9 @@ function FlatForm({
   onSaved: () => void;
 }) {
   const [reading, setReading] = useState(record?.meter_reading != null ? String(record.meter_reading) : "");
+  const [initialReading, setInitialReading] = useState(
+    record?.initial_meter_reading != null ? String(record.initial_meter_reading) : "",
+  );
   const [make, setMake] = useState(record?.meter_make ?? "");
   const [workDate, setWorkDate] = useState(record?.work_date ?? todayISO());
   const [remarks, setRemarks] = useState(record?.remarks ?? "");
@@ -282,6 +321,11 @@ function FlatForm({
       setError("Enter the meter reading (numbers only).");
       return;
     }
+    const initialNum = Number(initialReading);
+    if (initialReading.trim() === "" || !Number.isFinite(initialNum)) {
+      setError("Enter the initial meter reading (numbers only).");
+      return;
+    }
     if (!make.trim()) {
       setError("Enter the meter make.");
       return;
@@ -307,6 +351,7 @@ function FlatForm({
         site_flat_id: flat.id,
         location_id: flat.location_id,
         meter_reading: readingNum,
+        initial_meter_reading: initialNum,
         meter_make: make.trim(),
         work_date: workDate,
         remarks: remarks.trim() || null,
@@ -364,6 +409,15 @@ function FlatForm({
             onChange={(e) => setReading(e.target.value)}
             className={inputClass}
             placeholder="e.g. 00123.450"
+          />
+        </Field>
+        <Field label="Initial meter reading">
+          <input
+            inputMode="decimal"
+            value={initialReading}
+            onChange={(e) => setInitialReading(e.target.value)}
+            className={inputClass}
+            placeholder="e.g. 00120.000"
           />
         </Field>
         <Field label="Meter make">

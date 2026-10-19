@@ -21,10 +21,11 @@ No app to install — it's just a website; add it to the home screen if you like
 - **Reports**: live current week, a week list with tap-to-view summaries, and a monthly view that
   includes monthly-salaried workers. Advances / deductions / bonuses are editable from a list.
 - Owner home shows a read-only per-site headcount for the day with the marker's name.
-- **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the meter reading,
-  meter make, work date, remarks and two on-site photos (meter, valve/regulator), see a
-  done/pending progress bar, and download a per-flat PDF. The owner sees per-site progress and can
-  download a **combined PDF** of all recorded flats for a site. Photos are downscaled on the phone
+- **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the **meter reading**
+  and **initial meter reading**, meter make, work date, remarks and two photos (meter, valve/regulator)
+  — each photo can be taken with the camera or uploaded from the gallery — sees a done/pending progress
+  bar, and can view or download a per-flat PDF. The owner can **open a flat in-app** (photos + details)
+  or download a **combined PDF** of all recorded flats for a site. Photos are downscaled on the phone
   before upload.
 - Live sync across all phones via Supabase Realtime.
 
