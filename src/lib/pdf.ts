@@ -62,8 +62,26 @@ function drawFitted(
   return h;
 }
 
-function placeholder(doc: jsPDF, x: number, y: number, w: number, h: number, label: string) {
-  doc.setDrawColor(200);
+function drawFittedCentered(
+  doc: jsPDF,
+  img: Img,
+  x: number,
+  y: number,
+  maxW: number,
+  maxH: number,
+): number {
+  const ratio = img.height / img.width;
+  let w = maxW;
+  let h = w * ratio;
+  if (h > maxH) {
+    h = maxH;
+    w = h / ratio;
+  }
+  doc.addImage(img.data, "JPEG", x + (maxW - w) / 2, y, w, h);
+  return h;
+}
+
+function placeholder(doc: jsPDF, x: number, y: number, w: number, h: number, label: string) {  doc.setDrawColor(200);
   doc.setFillColor(245, 247, 250);
   doc.roundedRect(x, y, w, h, 2, 2, "FD");
   doc.setTextColor(150);
@@ -80,7 +98,7 @@ function fieldRows(siteName: string, flat: SiteFlat, rec: MeterRecord): [string,
     ["Consumer name", flat.consumer_name ?? "—"],
     ["BP number", flat.bp_number ?? "—"],
     ["Application no.", flat.application_no ?? "—"],
-    ["Meter reading", rec.meter_reading != null ? String(rec.meter_reading) : "—"],
+    ["Meter number", rec.meter_reading != null ? String(rec.meter_reading) : "—"],
     ["Initial meter reading", rec.initial_meter_reading != null ? String(rec.initial_meter_reading) : "—"],
     ["Meter make", rec.meter_make ?? "—"],
     ["Work date", prettyDate(rec.work_date)],
@@ -154,14 +172,48 @@ function renderFlatPage(
   );
 }
 
+function renderFormPage(
+  doc: jsPDF,
+  siteName: string,
+  flat: SiteFlat,
+  rec: MeterRecord,
+  formImg: Img | null,
+) {
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text(siteName.toUpperCase(), M, M);
+  doc.setFontSize(15);
+  doc.setTextColor(17);
+  doc.text(`Flat ${flat.flat_number} — GAIL form`, M, M + 7);
+  doc.setFontSize(10);
+  doc.setTextColor(95);
+  doc.text(`Meter no. ${rec.meter_reading ?? "—"} · ${prettyDate(rec.work_date)}`, M, M + 13);
+  doc.setDrawColor(215);
+  doc.line(M, M + 16, PAGE_W - M, M + 16);
+
+  const top = M + 22;
+  const maxH = 297 - top - 14;
+  if (formImg) drawFittedCentered(doc, formImg, M, top, CONTENT_W, maxH);
+  else placeholder(doc, M, top, CONTENT_W, maxH, "No form scan");
+
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  doc.text(`Generated ${prettyDate(todayISO())} · Attendance Register`, M, 297 - 8);
+}
+
 export async function buildFlatPdf(siteName: string, flat: SiteFlat, rec: MeterRecord): Promise<jsPDF> {
   const { jsPDF: JsPDF } = await import("jspdf");
-  const [meterImg, valveImg] = await Promise.all([
+  const [meterImg, valveImg, formImg] = await Promise.all([
     loadImage(rec.meter_photo_path),
     loadImage(rec.valve_photo_path),
+    loadImage(rec.form_photo_path),
   ]);
   const doc = new JsPDF({ unit: "mm", format: "a4" });
   renderFlatPage(doc, siteName, flat, rec, meterImg, valveImg);
+  if (formImg) {
+    doc.addPage();
+    renderFormPage(doc, siteName, flat, rec, formImg);
+  }
   return doc;
 }
 
@@ -189,12 +241,17 @@ export async function buildSitePdf(
 
   let done = 0;
   for (const { flat, record } of items) {
-    const [meterImg, valveImg] = await Promise.all([
+    const [meterImg, valveImg, formImg] = await Promise.all([
       loadImage(record.meter_photo_path),
       loadImage(record.valve_photo_path),
+      loadImage(record.form_photo_path),
     ]);
     doc.addPage();
     renderFlatPage(doc, siteName, flat, record, meterImg, valveImg);
+    if (formImg) {
+      doc.addPage();
+      renderFormPage(doc, siteName, flat, record, formImg);
+    }
     done += 1;
     onProgress?.(done, items.length);
   }

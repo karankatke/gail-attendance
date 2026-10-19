@@ -180,7 +180,7 @@ export interface BataReportRow {
 }
 
 export type MeterStatus = "draft" | "done";
-export type MeterPhotoKind = "meter" | "valve";
+export type MeterPhotoKind = "meter" | "valve" | "form";
 
 export interface SiteFlat {
   id: string;
@@ -213,6 +213,7 @@ export interface MeterRecord {
   remarks: string | null;
   meter_photo_path: string | null;
   valve_photo_path: string | null;
+  form_photo_path: string | null;
   status: MeterStatus;
   created_by_profile_id: string | null;
   created_at: string;

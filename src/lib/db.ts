@@ -165,6 +165,7 @@ export async function saveMeterRecord(input: {
   remarks: string | null;
   meter_photo_path: string;
   valve_photo_path: string;
+  form_photo_path: string;
   status: MeterStatus;
   created_by_profile_id: string | null;
 }): Promise<MeterRecord | null> {

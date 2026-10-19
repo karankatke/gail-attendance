@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, Empty, Field, Modal, Spinner, inputClass } from "../components/ui";
+import { DocumentScanner } from "../components/DocumentScanner";
 import { useTable } from "../hooks/useTable";
 import { useAuth } from "../context/AuthContext";
 import { addSiteFlat, removeRow, saveMeterRecord } from "../lib/db";
@@ -292,33 +293,40 @@ function FlatForm({
   const [remarks, setRemarks] = useState(record?.remarks ?? "");
   const [meter, setMeter] = useState<{ blob: Blob; url: string } | null>(null);
   const [valve, setValve] = useState<{ blob: Blob; url: string } | null>(null);
+  const [formScan, setFormScan] = useState<{ blob: Blob; url: string } | null>(null);
   const [remoteMeter, setRemoteMeter] = useState<string | null>(null);
   const [remoteValve, setRemoteValve] = useState<string | null>(null);
+  const [remoteForm, setRemoteForm] = useState<string | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([meterPhotoUrl(record?.meter_photo_path ?? null), meterPhotoUrl(record?.valve_photo_path ?? null)]).then(
-      ([m, v]) => {
-        if (cancelled) return;
-        setRemoteMeter(m);
-        setRemoteValve(v);
-      },
-    );
+    Promise.all([
+      meterPhotoUrl(record?.meter_photo_path ?? null),
+      meterPhotoUrl(record?.valve_photo_path ?? null),
+      meterPhotoUrl(record?.form_photo_path ?? null),
+    ]).then(([m, v, f]) => {
+      if (cancelled) return;
+      setRemoteMeter(m);
+      setRemoteValve(v);
+      setRemoteForm(f);
+    });
     return () => {
       cancelled = true;
     };
-  }, [record?.meter_photo_path, record?.valve_photo_path]);
+  }, [record?.meter_photo_path, record?.valve_photo_path, record?.form_photo_path]);
 
   const hasMeter = !!meter || (!!remoteMeter && !!record?.meter_photo_path);
   const hasValve = !!valve || (!!remoteValve && !!record?.valve_photo_path);
+  const hasForm = !!formScan || (!!remoteForm && !!record?.form_photo_path);
 
   const save = async () => {
     const readingNum = Number(reading);
     if (reading.trim() === "" || !Number.isFinite(readingNum)) {
-      setError("Enter the meter reading (numbers only).");
+      setError("Enter the meter number.");
       return;
     }
     const initialNum = Number(initialReading);
@@ -338,6 +346,10 @@ function FlatForm({
       setError("Add the valve photo.");
       return;
     }
+    if (!hasForm) {
+      setError("Scan the filled GAIL form.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -347,6 +359,9 @@ function FlatForm({
       const valvePath = valve
         ? await uploadMeterPhoto(flat.location_id, flat.id, "valve", valve.blob)
         : record!.valve_photo_path!;
+      const formPath = formScan
+        ? await uploadMeterPhoto(flat.location_id, flat.id, "form", formScan.blob)
+        : record!.form_photo_path!;
       await saveMeterRecord({
         site_flat_id: flat.id,
         location_id: flat.location_id,
@@ -357,6 +372,7 @@ function FlatForm({
         remarks: remarks.trim() || null,
         meter_photo_path: meterPath,
         valve_photo_path: valvePath,
+        form_photo_path: formPath,
         status: "done",
         created_by_profile_id: profileId,
       });
@@ -402,7 +418,7 @@ function FlatForm({
           <Row label="Tower / floor" value={`${flat.tower ?? "—"} · ${flat.floor ?? "—"}`} />
         </div>
 
-        <Field label="Meter reading">
+        <Field label="Meter number">
           <input
             inputMode="decimal"
             value={reading}
@@ -430,6 +446,51 @@ function FlatForm({
         <PhotoField label="Meter photo" preview={meter?.url ?? remoteMeter} onChange={setMeter} />
         <PhotoField label="Valve / regulator photo (on)" preview={valve?.url ?? remoteValve} onChange={setValve} />
 
+        <div className="rounded-xl border border-slate-200 p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium text-slate-600">GAIL form (scan)</p>
+              <p className="text-[11px] text-slate-400">Photograph the filled & signed form; it will be straightened and cleaned up.</p>
+            </div>
+            {hasForm ? (
+              <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                Added
+              </span>
+            ) : (
+              <span className="shrink-0 text-[11px] font-semibold text-amber-600">Required</span>
+            )}
+          </div>
+
+          {formScan?.url ?? remoteForm ? (
+            <button
+              type="button"
+              onClick={() => setScanOpen(true)}
+              className="mt-2 block w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
+            >
+              <img
+                src={(formScan?.url ?? remoteForm) || ""}
+                alt="GAIL form"
+                className="max-h-56 w-full object-contain"
+              />
+            </button>
+          ) : null}
+
+          <div className="mt-2 flex gap-2">
+            <Button
+              variant={hasForm ? "secondary" : "primary"}
+              onClick={() => setScanOpen(true)}
+              className="flex-1 text-xs"
+            >
+              {hasForm ? "Rescan form" : "Scan form"}
+            </Button>
+            {formScan ? (
+              <Button variant="ghost" onClick={() => setFormScan(null)} className="text-xs">
+                Remove
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
         <Field label="Remarks (optional)">
           <input value={remarks} onChange={(e) => setRemarks(e.target.value)} className={inputClass} placeholder="e.g. regulator replaced" />
         </Field>
@@ -451,6 +512,17 @@ function FlatForm({
           </div>
         ) : null}
       </div>
+
+      {scanOpen ? (
+        <DocumentScanner
+          title={`Scan GAIL form · ${flat.flat_number}`}
+          onClose={() => setScanOpen(false)}
+          onDone={({ blob, url }) => {
+            setFormScan({ blob, url });
+            setScanOpen(false);
+          }}
+        />
+      ) : null}
     </Modal>
   );
 }

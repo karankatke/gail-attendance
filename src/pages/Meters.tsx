@@ -211,7 +211,7 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
           </p>
           <p className="truncate text-xs text-slate-500">
             {done && row.record
-              ? `Reading ${row.record.meter_reading ?? "—"} · ${row.record.meter_make ?? "—"}`
+              ? `Meter no. ${row.record.meter_reading ?? "—"} · ${row.record.meter_make ?? "—"}`
               : `BP ${row.flat.bp_number ?? "—"} · pending`}
           </p>
         </div>
@@ -255,22 +255,26 @@ function MeterViewer({
   const rec = row.record;
   const [meter, setMeter] = useState<string | null>(null);
   const [valve, setValve] = useState<string | null>(null);
+  const [form, setForm] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([meterPhotoUrl(rec?.meter_photo_path ?? null), meterPhotoUrl(rec?.valve_photo_path ?? null)]).then(
-      ([m, v]) => {
-        if (cancelled) return;
-        setMeter(m);
-        setValve(v);
-      },
-    );
+    Promise.all([
+      meterPhotoUrl(rec?.meter_photo_path ?? null),
+      meterPhotoUrl(rec?.valve_photo_path ?? null),
+      meterPhotoUrl(rec?.form_photo_path ?? null),
+    ]).then(([m, v, f]) => {
+      if (cancelled) return;
+      setMeter(m);
+      setValve(v);
+      setForm(f);
+    });
     return () => {
       cancelled = true;
     };
-  }, [rec?.meter_photo_path, rec?.valve_photo_path]);
+  }, [rec?.meter_photo_path, rec?.valve_photo_path, rec?.form_photo_path]);
 
   const pdf = async () => {
     if (!rec) return;
@@ -297,7 +301,7 @@ function MeterViewer({
         {rec ? (
           <>
             <div className="rounded-xl bg-brand-50 p-3 text-sm">
-              <InfoRow label="Meter reading" value={rec.meter_reading != null ? String(rec.meter_reading) : "—"} strong />
+              <InfoRow label="Meter number" value={rec.meter_reading != null ? String(rec.meter_reading) : "—"} strong />
               <InfoRow
                 label="Initial meter reading"
                 value={rec.initial_meter_reading != null ? String(rec.initial_meter_reading) : "—"}
@@ -310,6 +314,21 @@ function MeterViewer({
             <div className="grid grid-cols-2 gap-2">
               <PhotoTile label="Meter photo" url={meter} onZoom={setZoom} />
               <PhotoTile label="Valve / regulator" url={valve} onZoom={setZoom} />
+            </div>
+
+            <div>
+              <p className="mb-1 text-[11px] font-medium text-slate-500">GAIL form</p>
+              <button
+                type="button"
+                onClick={() => (form ? setZoom(form) : undefined)}
+                className="flex max-h-64 w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-[11px] text-slate-400"
+              >
+                {form ? (
+                  <img src={form} alt="GAIL form" className="max-h-64 w-full object-contain" />
+                ) : (
+                  "No form scan"
+                )}
+              </button>
             </div>
 
             <Button onClick={pdf} disabled={busy} className="w-full">
