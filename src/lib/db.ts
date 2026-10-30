@@ -95,6 +95,59 @@ export async function fetchPublicWorkers(): Promise<PublicWorker[]> {
   return (data ?? []) as PublicWorker[];
 }
 
+/**
+ * Best-effort team map: which supervisor each worker belongs to, inferred from
+ * who marks their attendance most often. Ties go to the most recent marker.
+ * Returns worker_id -> supervisor profile id.
+ */
+export async function fetchWorkerSupervisors(
+  supervisorIds: string[],
+  days = 180,
+): Promise<Record<string, string>> {
+  if (supervisorIds.length === 0) return {};
+  const client = requireClient();
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const sinceISO = since.toISOString().slice(0, 10);
+
+  const { data, error } = await client
+    .from("attendance")
+    .select("worker_id, marked_by, work_date")
+    .gte("work_date", sinceISO)
+    .not("marked_by", "is", null);
+  if (error) throw error;
+
+  const allowed = new Set(supervisorIds);
+  const tally = new Map<string, Map<string, { count: number; latest: string }>>();
+
+  for (const row of (data ?? []) as { worker_id: string; marked_by: string; work_date: string }[]) {
+    if (!allowed.has(row.marked_by)) continue;
+    let perWorker = tally.get(row.worker_id);
+    if (!perWorker) {
+      perWorker = new Map();
+      tally.set(row.worker_id, perWorker);
+    }
+    const stat = perWorker.get(row.marked_by) ?? { count: 0, latest: "" };
+    stat.count += 1;
+    if (row.work_date > stat.latest) stat.latest = row.work_date;
+    perWorker.set(row.marked_by, stat);
+  }
+
+  const out: Record<string, string> = {};
+  for (const [workerId, perWorker] of tally) {
+    let bestId: string | null = null;
+    let best = { count: -1, latest: "" };
+    for (const [profileId, stat] of perWorker) {
+      if (stat.count > best.count || (stat.count === best.count && stat.latest > best.latest)) {
+        best = stat;
+        bestId = profileId;
+      }
+    }
+    if (bestId) out[workerId] = bestId;
+  }
+  return out;
+}
+
 export async function fetchPublicRoles(): Promise<PublicRole[]> {
   const client = requireClient();
   const { data, error } = await client.rpc("public_roles");
@@ -187,6 +240,7 @@ export async function addSiteFlat(input: {
   tower: string | null;
   floor: number | null;
   bp_number: string | null;
+  consumer_name?: string | null;
   created_by_profile_id: string;
 }): Promise<SiteFlat | null> {
   const client = requireClient();
@@ -197,4 +251,26 @@ export async function addSiteFlat(input: {
     .single();
   if (error) throw error;
   return data as SiteFlat;
+}
+
+export async function updateSiteFlat(
+  id: string,
+  input: {
+    flat_number: string;
+    flat_key: string;
+    tower: string | null;
+    floor: number | null;
+    bp_number: string | null;
+    consumer_name: string | null;
+  },
+): Promise<void> {
+  const client = requireClient();
+  const { error } = await client.from("site_flats").update(input).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteSiteFlat(id: string): Promise<void> {
+  const client = requireClient();
+  const { error } = await client.from("site_flats").delete().eq("id", id);
+  if (error) throw error;
 }

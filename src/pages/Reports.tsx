@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Card, Field, Modal, Spinner, inputClass } from "../components/ui";
 import { useTable } from "../hooks/useTable";
 import { requireClient } from "../lib/supabase";
-import { insertRow, removeRow, updateRow } from "../lib/db";
+import { fetchDayAttendance, insertRow, removeRow, updateRow } from "../lib/db";
 import {
   addDays,
   monthLabel,
@@ -26,6 +26,12 @@ import type {
 
 type Mode = "week" | "month";
 
+interface TodaySummary {
+  wages: number;
+  onSite: number;
+  sites: { name: string; count: number }[];
+}
+
 const TYPE_LABEL: Record<AdjustmentType, string> = {
   advance: "Advance",
   deduction: "Deduction",
@@ -45,6 +51,10 @@ export function ReportsPage() {
   const [summary, setSummary] = useState<{ from: string; to: string } | null>(null);
   const [grantOpen, setGrantOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [todayOpen, setTodayOpen] = useState(false);
+  const [todayLoading, setTodayLoading] = useState(false);
+  const [todaySummary, setTodaySummary] = useState<TodaySummary | null>(null);
+  const [todayError, setTodayError] = useState<string | null>(null);
 
   const { rows: workers } = useTable<Worker>("workers", { orderColumn: "name" });
 
@@ -77,6 +87,46 @@ export function ReportsPage() {
     setAdjustments((r4.data ?? []) as Advance[]);
     setLoading(false);
   }, [mode, range.from, range.to]);
+
+  const openToday = async () => {
+    setTodayOpen(true);
+    setTodayLoading(true);
+    setTodayError(null);
+    setTodaySummary(null);
+    try {
+      const today = todayISO();
+      const client = requireClient();
+      const [rep, day] = await Promise.all([
+        client.rpc("report_range", { p_from: today, p_to: today, p_include_monthly: true }),
+        fetchDayAttendance(today),
+      ]);
+      const wages = ((rep.data ?? []) as ReportRow[]).reduce(
+        (sum, r) => sum + Number(r.gross_pay),
+        0,
+      );
+      const bySite = new Map<string, { name: string; count: number }>();
+      let onSite = 0;
+      for (const row of day) {
+        if (row.status === "absent") continue;
+        onSite += 1;
+        const key = row.location_id ?? "__none__";
+        const entry = bySite.get(key) ?? { name: row.location_name ?? "No site", count: 0 };
+        entry.count += 1;
+        bySite.set(key, entry);
+      }
+      setTodaySummary({
+        wages,
+        onSite,
+        sites: [...bySite.values()].sort(
+          (a, b) => b.count - a.count || a.name.localeCompare(b.name),
+        ),
+      });
+    } catch (e) {
+      setTodayError(e instanceof Error ? e.message : "Could not load today's summary");
+    } finally {
+      setTodayLoading(false);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -182,6 +232,9 @@ export function ReportsPage() {
           {range.from} → {range.to}
           {mode === "month" ? " · includes monthly salaried" : ""}
         </p>
+        <Button variant="secondary" onClick={openToday} className="mt-2 w-full py-2 text-xs">
+          Today's summary
+        </Button>
       </Card>
 
       <div className="grid grid-cols-2 gap-2">
@@ -376,6 +429,43 @@ export function ReportsPage() {
             refresh();
           }}
         />
+      ) : null}
+
+      {todayOpen ? (
+        <Modal title={`Today · ${prettyDate(todayISO())}`} onClose={() => setTodayOpen(false)}>
+          {todayLoading ? (
+            <Spinner />
+          ) : todayError ? (
+            <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{todayError}</p>
+          ) : todaySummary ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                <Stat label="Total wages" value={formatINR(todaySummary.wages)} tone="emerald" />
+                <Stat label="On site" value={String(todaySummary.onSite)} />
+              </div>
+              <div>
+                <p className="mb-2 text-sm font-medium text-slate-500">Headcount by site</p>
+                {todaySummary.sites.length === 0 ? (
+                  <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">
+                    No attendance marked today yet.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {todaySummary.sites.map((s, i) => (
+                      <div
+                        key={`${s.name}-${i}`}
+                        className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2"
+                      >
+                        <span className="text-sm text-slate-700">{s.name}</span>
+                        <span className="font-semibold text-slate-900">{s.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </Modal>
       ) : null}
     </div>
   );

@@ -3,10 +3,10 @@ import { Button, Card, Empty, Field, Modal, Spinner, inputClass } from "../compo
 import { DocumentScanner } from "../components/DocumentScanner";
 import { useTable } from "../hooks/useTable";
 import { useAuth } from "../context/AuthContext";
-import { addSiteFlat, removeRow, saveMeterRecord } from "../lib/db";
+import { addSiteFlat, deleteSiteFlat, removeRow, saveMeterRecord, updateSiteFlat } from "../lib/db";
 import { todayISO } from "../lib/dates";
 import { compressImage, flatSort, meterPhotoUrl, uploadMeterPhoto } from "../lib/meters";
-import { buildFlatPdf, pdfFileName, sharePdf } from "../lib/pdf";
+import { buildFormPdf, buildMeterPhotoPdf, pdfFileName, sharePdf } from "../lib/pdf";
 import type { MeterRecord, MeterFlatRow, SiteFlat, WorkLocation } from "../lib/types";
 
 type Filter = "pending" | "done" | "all";
@@ -14,12 +14,13 @@ type Filter = "pending" | "done" | "all";
 export function MeterDetailsPage() {
   const { profile } = useAuth();
   const { rows: locations } = useTable<WorkLocation>("locations", { orderColumn: "name" });
-  const { rows: flats, loading: flatsLoading } = useTable<SiteFlat>("site_flats");
+  const { rows: flats, loading: flatsLoading, refetch: refetchFlats } = useTable<SiteFlat>("site_flats");
   const { rows: records, loading: recLoading, refetch } = useTable<MeterRecord>("meter_records");
 
   const [siteId, setSiteId] = useState("");
   const [filter, setFilter] = useState<Filter>("pending");
   const [editing, setEditing] = useState<SiteFlat | null>(null);
+  const [editingFlat, setEditingFlat] = useState<SiteFlat | null>(null);
   const [adding, setAdding] = useState(false);
 
   const sitesWithFlats = useMemo(() => {
@@ -111,7 +112,12 @@ export function MeterDetailsPage() {
       ) : (
         <div className="space-y-2">
           {visible.map((r) => (
-            <FlatRow key={r.flat.id} row={r} onOpen={() => setEditing(r.flat)} />
+            <FlatRow
+              key={r.flat.id}
+              row={r}
+              onOpen={() => setEditing(r.flat)}
+              onEdit={() => setEditingFlat(r.flat)}
+            />
           ))}
         </div>
       )}
@@ -141,16 +147,36 @@ export function MeterDetailsPage() {
           }}
         />
       ) : null}
+
+      {editingFlat ? (
+        <EditFlatForm
+          flat={editingFlat}
+          hasRecord={!!recordByFlat.get(editingFlat.id)}
+          onClose={() => setEditingFlat(null)}
+          onSaved={async () => {
+            setEditingFlat(null);
+            await refetchFlats();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
-function FlatRow({ row, onOpen }: { row: MeterFlatRow; onOpen: () => void }) {
+function FlatRow({
+  row,
+  onOpen,
+  onEdit,
+}: {
+  row: MeterFlatRow;
+  onOpen: () => void;
+  onEdit: () => void;
+}) {
   const done = row.record?.status === "done";
   return (
     <Card className="p-3">
-      <button onClick={onOpen} className="flex w-full items-center justify-between gap-3 text-left">
-        <div className="min-w-0">
+      <div className="flex items-center justify-between gap-3">
+        <button onClick={onOpen} className="min-w-0 flex-1 text-left">
           <p className="font-semibold text-slate-900">
             {row.flat.flat_number}
             {row.flat.consumer_name ? (
@@ -158,18 +184,28 @@ function FlatRow({ row, onOpen }: { row: MeterFlatRow; onOpen: () => void }) {
             ) : null}
           </p>
           <p className="truncate text-xs text-slate-500">
-            BP {row.flat.bp_number ?? "—"}
+            BP {row.flat.bp_number ?? "-"}
             {row.flat.application_no ? ` · App ${row.flat.application_no}` : ""}
           </p>
+        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {row.flat.source === "manual" ? (
+            <button
+              onClick={onEdit}
+              className="rounded-lg px-2 py-1 text-xs font-semibold text-brand-700 active:bg-brand-50"
+            >
+              Edit
+            </button>
+          ) : null}
+          <span
+            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+              done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+            }`}
+          >
+            {done ? "Done" : "Pending"}
+          </span>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-            done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-          }`}
-        >
-          {done ? "Done" : "Pending"}
-        </span>
-      </button>
+      </div>
     </Card>
   );
 }
@@ -298,8 +334,9 @@ function FlatForm({
   const [remoteValve, setRemoteValve] = useState<string | null>(null);
   const [remoteForm, setRemoteForm] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
+  const [saved, setSaved] = useState<MeterRecord | null>(null);
   const [busy, setBusy] = useState(false);
-  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<"form" | "meter" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -343,7 +380,7 @@ function FlatForm({
       return;
     }
     if (!hasValve) {
-      setError("Add the valve photo.");
+      setError("Add the stove photo.");
       return;
     }
     if (!hasForm) {
@@ -362,7 +399,7 @@ function FlatForm({
       const formPath = formScan
         ? await uploadMeterPhoto(flat.location_id, flat.id, "form", formScan.blob)
         : record!.form_photo_path!;
-      await saveMeterRecord({
+      const row = await saveMeterRecord({
         site_flat_id: flat.id,
         location_id: flat.location_id,
         meter_reading: readingNum,
@@ -376,23 +413,35 @@ function FlatForm({
         status: "done",
         created_by_profile_id: profileId,
       });
-      onSaved();
+      if (row) {
+        setSaved(row);
+        setBusy(false);
+      } else {
+        onSaved();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save");
       setBusy(false);
     }
   };
 
-  const download = async () => {
-    if (!record) return;
-    setPdfBusy(true);
+  const downloadPdf = async (kind: "form" | "meter") => {
+    const rec = saved ?? record;
+    if (!rec) return;
+    setPdfBusy(kind);
+    setError(null);
     try {
-      const doc = await buildFlatPdf(siteName, flat, record);
-      const name = pdfFileName(siteName, flat.flat_number);
+      const doc =
+        kind === "form"
+          ? await buildFormPdf(siteName, flat, rec)
+          : await buildMeterPhotoPdf(siteName, flat, rec);
+      const name = pdfFileName(siteName, flat.flat_number, kind);
       const res = await sharePdf(doc, name);
       if (res === "downloaded") setError("PDF saved to your device.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not build the PDF");
     } finally {
-      setPdfBusy(false);
+      setPdfBusy(null);
     }
   };
 
@@ -407,6 +456,39 @@ function FlatForm({
       setBusy(false);
     }
   };
+
+  if (saved) {
+    return (
+      <Modal title={`Flat ${flat.flat_number}`} onClose={onSaved}>
+        <div className="space-y-4">
+          <div className="rounded-xl bg-emerald-50 p-4 text-center">
+            <p className="text-sm font-semibold text-emerald-800">Meter details saved</p>
+            <p className="mt-0.5 text-xs text-emerald-700">Download the PDFs you need, then close.</p>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => downloadPdf("form")}
+            disabled={!!pdfBusy || !saved.form_photo_path}
+            className="w-full"
+          >
+            {pdfBusy === "form" ? "Building…" : "Download GAIL form PDF"}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => downloadPdf("meter")}
+            disabled={!!pdfBusy || !saved.meter_photo_path}
+            className="w-full"
+          >
+            {pdfBusy === "meter" ? "Building…" : "Download meter photo PDF"}
+          </Button>
+          {error ? <p className="text-sm text-slate-600">{error}</p> : null}
+          <Button onClick={onSaved} className="w-full">
+            Done
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal title={`Flat ${flat.flat_number}`} onClose={onClose}>
@@ -444,7 +526,7 @@ function FlatForm({
         </Field>
 
         <PhotoField label="Meter photo" preview={meter?.url ?? remoteMeter} onChange={setMeter} />
-        <PhotoField label="Valve / regulator photo (on)" preview={valve?.url ?? remoteValve} onChange={setValve} />
+        <PhotoField label="Stove photo (on)" preview={valve?.url ?? remoteValve} onChange={setValve} />
 
         <div className="rounded-xl border border-slate-200 p-3">
           <div className="flex items-start justify-between gap-2">
@@ -502,12 +584,27 @@ function FlatForm({
         </Button>
 
         {record ? (
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={download} disabled={pdfBusy} className="flex-1">
-              {pdfBusy ? "Building…" : "Download PDF"}
-            </Button>
-            <Button variant="danger" onClick={del} disabled={busy} className="flex-1">
-              Delete
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => downloadPdf("form")}
+                disabled={!!pdfBusy}
+                className="flex-1 text-xs"
+              >
+                {pdfBusy === "form" ? "Building…" : "GAIL form PDF"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => downloadPdf("meter")}
+                disabled={!!pdfBusy}
+                className="flex-1 text-xs"
+              >
+                {pdfBusy === "meter" ? "Building…" : "Meter photo PDF"}
+              </Button>
+            </div>
+            <Button variant="danger" onClick={del} disabled={busy} className="w-full">
+              Delete record
             </Button>
           </div>
         ) : null}
@@ -571,6 +668,7 @@ function AddFlatForm({
         tower,
         floor: Number.isFinite(digits) && digits > 0 ? Math.floor(digits / 100) : null,
         bp_number: bpNumber.trim() || null,
+        consumer_name: consumerName.trim() || null,
         created_by_profile_id: profileId,
       });
       onSaved();
@@ -596,6 +694,118 @@ function AddFlatForm({
         <Button onClick={save} disabled={busy} className="w-full">
           {busy ? "Adding…" : "Add flat"}
         </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function EditFlatForm({
+  flat,
+  hasRecord,
+  onClose,
+  onSaved,
+}: {
+  flat: SiteFlat;
+  hasRecord: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [flatNumber, setFlatNumber] = useState(flat.flat_number);
+  const [bpNumber, setBpNumber] = useState(flat.bp_number ?? "");
+  const [consumerName, setConsumerName] = useState(flat.consumer_name ?? "");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    const num = flatNumber.trim().toUpperCase();
+    if (!num) {
+      setError("Enter the flat number.");
+      return;
+    }
+    const tower = num.match(/^[A-Z]/)?.[0] ?? null;
+    const digits = Number(num.replace(/\D/g, ""));
+    setBusy(true);
+    setError(null);
+    try {
+      await updateSiteFlat(flat.id, {
+        flat_number: num,
+        flat_key: num.replace(/[^A-Z0-9]/g, ""),
+        tower,
+        floor: Number.isFinite(digits) && digits > 0 ? Math.floor(digits / 100) : null,
+        bp_number: bpNumber.trim() || null,
+        consumer_name: consumerName.trim() || null,
+      });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the flat");
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (hasRecord) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteSiteFlat(flat.id);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete the flat");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title="Edit flat" onClose={onClose}>
+      <div className="space-y-4">
+        <Field label="Flat number" hint="e.g. B-1901">
+          <input value={flatNumber} onChange={(e) => setFlatNumber(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="Consumer name (optional)">
+          <input value={consumerName} onChange={(e) => setConsumerName(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="BP number (optional)">
+          <input value={bpNumber} onChange={(e) => setBpNumber(e.target.value)} className={inputClass} />
+        </Field>
+
+        {hasRecord ? (
+          <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+            This flat already has meter details. Remove the meter record before deleting the flat.
+          </p>
+        ) : null}
+
+        {confirmDelete ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+            <p className="text-sm text-red-800">
+              Delete flat {flat.flat_number}? This cannot be undone.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Button variant="secondary" onClick={() => setConfirmDelete(false)} className="flex-1">
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={remove} disabled={busy} className="flex-1">
+                {busy ? "Deleting…" : "Delete"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+
+        <Button onClick={save} disabled={busy} className="w-full">
+          {busy ? "Saving…" : "Save changes"}
+        </Button>
+        {!confirmDelete ? (
+          <Button
+            variant="ghost"
+            onClick={() => setConfirmDelete(true)}
+            disabled={busy || hasRecord}
+            className="w-full text-red-600"
+          >
+            Delete flat
+          </Button>
+        ) : null}
       </div>
     </Modal>
   );

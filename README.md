@@ -19,16 +19,19 @@ No app to install — it's just a website; add it to the home screen if you like
 - **Bata**: owner hands cash to a supervisor; the supervisor records the breakdown (lunch, travel/tempo,
   material, other) and the owner sees it in reports as a separate "misc" line.
 - **Reports**: live current week, a week list with tap-to-view summaries, and a monthly view that
-  includes monthly-salaried workers. Advances / deductions / bonuses are editable from a list.
+  includes monthly-salaried workers. A **Today's summary** popup shows today's total wages and the
+  headcount for each site. Advances / deductions / bonuses are editable from a list.
 - Owner home shows a read-only per-site headcount for the day with the marker's name.
 - **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the **meter number**
-  and **initial meter reading**, meter make, work date, remarks and two photos (meter, valve/regulator)
-  — each photo can be taken with the camera or uploaded from the gallery — sees a done/pending progress
-  bar, and can view or download a per-flat PDF. The filled GAIL paper form is captured with a built-in
-  **document scanner** (auto edge detection, draggable corner correction, colour/grey/B&W cleanup) and is
-  required before a flat is marked done; it gets its own page in the PDF. The owner can **open a flat
-  in-app** (photos + form + details) or download a **combined PDF** of all recorded flats for a site.
-  Photos are downscaled on the phone before upload.
+  and **initial meter reading**, meter make, work date, remarks and two photos (meter, stove) — each
+  photo can be taken with the camera or uploaded from the gallery — sees a done/pending progress bar,
+  and can view or download PDFs. Flats a supervisor adds by hand can be **edited or deleted**, as long
+  as no meter record exists. The filled GAIL paper form is captured with a full-screen **document
+  scanner** (auto edge detection, optional corner correction, colour/grey/B&W cleanup) and is required
+  before a flat is marked done. Two single-purpose PDFs are available: the **GAIL form** only, and the
+  **meter photo + details** (no stove photo). The owner can **open a flat in-app** (photos + form +
+  details) or download a **combined PDF** of all recorded flats for a site. Photos are downscaled on the
+  phone before upload.
 - Live sync across all phones via Supabase Realtime.
 
 Stack: React + Vite + TypeScript + Tailwind, Supabase (Postgres + Auth + RLS + Realtime + Edge Functions),
@@ -135,10 +138,13 @@ Report functions: `report_range(from,to,include_monthly)`, `report_by_location(f
 `reject_access`, `public_workers()`, `is_owner()`, `current_profile_id()`.
 
 ### Meter photos
-Private Supabase Storage bucket `meter-photos`, paths `{location}/{flat}/meter.jpg`, `.../valve.jpg` and
-`.../form.jpg`. Images are resized on the device (max 1600px, JPEG) before upload; the form scan goes
-through the scanner cleanup first. The app reads them back through short-lived signed URLs. The scanner
-is `scanic` (MIT, ~43 KB gzipped) and is lazy-loaded only when a supervisor opens it.
+Private Supabase Storage bucket `meter-photos`, paths `{location}/{flat}/meter.jpg`, `.../valve.jpg`
+(the stove photo) and `.../form.jpg`. Images are resized on the device (max 1600px, JPEG) before upload;
+the form scan goes through the scanner cleanup first. The app reads them back through short-lived signed
+URLs. The scanner is `scanic` (MIT, ~43 KB gzipped) and is lazy-loaded only when a supervisor opens it.
+
+Supervisors can edit or delete only **manual** flats (never imported rows), and only while the flat has
+no meter record. Apply `supabase/manual_flat_policies.sql` once in the SQL editor to enable that.
 
 ## Security notes
 - Row Level Security is on for every table. Supervisors can read locations and attendance and write

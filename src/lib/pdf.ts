@@ -114,6 +114,7 @@ function renderFlatPage(
   rec: MeterRecord,
   meterImg: Img | null,
   valveImg: Img | null,
+  showStove = true,
 ) {
   // Header
   doc.setFontSize(9);
@@ -145,22 +146,24 @@ function renderFlatPage(
   // Photos
   y += 3;
   const gap = 6;
-  const boxW = (CONTENT_W - gap) / 2;
-  const boxH = 74;
+  const boxW = showStove ? (CONTENT_W - gap) / 2 : CONTENT_W;
+  const boxH = showStove ? 74 : 95;
   const meterX = M;
   const valveX = M + boxW + gap;
 
   doc.setFontSize(10);
   doc.setTextColor(60);
   doc.text("Meter photo", meterX, y);
-  doc.text("Valve / regulator (on)", valveX, y);
+  if (showStove) doc.text("Stove photo (on)", valveX, y);
   const imgY = y + 3;
 
   if (meterImg) drawFitted(doc, meterImg, meterX, imgY, boxW, boxH);
   else placeholder(doc, meterX, imgY, boxW, boxH, "No photo");
 
-  if (valveImg) drawFitted(doc, valveImg, valveX, imgY, boxW, boxH);
-  else placeholder(doc, valveX, imgY, boxW, boxH, "No photo");
+  if (showStove) {
+    if (valveImg) drawFitted(doc, valveImg, valveX, imgY, boxW, boxH);
+    else placeholder(doc, valveX, imgY, boxW, boxH, "No photo");
+  }
 
   // Footer
   doc.setFontSize(8);
@@ -258,10 +261,40 @@ export async function buildSitePdf(
   return doc;
 }
 
-export function pdfFileName(siteName: string, flatNumber?: string): string {
+export async function buildFormPdf(
+  siteName: string,
+  flat: SiteFlat,
+  rec: MeterRecord,
+): Promise<jsPDF> {
+  const { jsPDF: JsPDF } = await import("jspdf");
+  const formImg = await loadImage(rec.form_photo_path);
+  const doc = new JsPDF({ unit: "mm", format: "a4" });
+  renderFormPage(doc, siteName, flat, rec, formImg);
+  return doc;
+}
+
+export async function buildMeterPhotoPdf(
+  siteName: string,
+  flat: SiteFlat,
+  rec: MeterRecord,
+): Promise<jsPDF> {
+  const { jsPDF: JsPDF } = await import("jspdf");
+  const meterImg = await loadImage(rec.meter_photo_path);
+  const doc = new JsPDF({ unit: "mm", format: "a4" });
+  renderFlatPage(doc, siteName, flat, rec, meterImg, null, false);
+  return doc;
+}
+
+export function pdfFileName(
+  siteName: string,
+  flatNumber?: string,
+  kind?: "form" | "meter",
+): string {
   const slug = siteName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
   const stamp = todayISO();
-  return flatNumber ? `${slug}-${flatNumber}-meter.pdf` : `${slug}-meters-${stamp}.pdf`;
+  if (!flatNumber) return `${slug}-meters-${stamp}.pdf`;
+  const suffix = kind === "form" ? "gail-form" : kind === "meter" ? "meter-photo" : "meter";
+  return `${slug}-${flatNumber}-${suffix}.pdf`;
 }
 
 /** Share via the native sheet when possible, otherwise download. */

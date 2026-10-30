@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CornerPoints, CornerEditor } from "scanic";
-import { Button, Modal } from "./ui";
 import { applyScanFilter, canvasToJpeg, type ScanFilter } from "../lib/scanFilter";
 
 type Stage = "pick" | "detect" | "adjust" | "preview";
@@ -41,23 +40,44 @@ export function DocumentScanner({
     return scanicRef.current;
   }, []);
 
-  /* ---------- capture ---------- */
-
-  const acceptFile = async (file: File | null | undefined) => {
-    if (!file) return;
+  const reset = () => {
+    setSource(null);
+    setStage("pick");
+    setMessage(null);
     setError(null);
-    setMessage("Preparing photo…");
+    setConfidence(null);
+    extractedRef.current = null;
+    filteredRef.current = null;
+    initCornersRef.current = null;
+  };
+
+  /* ---------- straighten ---------- */
+
+  const extractWith = async (canvas: HTMLCanvasElement, corners: CornerPoints) => {
     setStage("detect");
+    setMessage("Straightening the page…");
+    setError(null);
     try {
-      const canvas = await fileToCanvas(file, 2000);
-      setSource(canvas);
-      await detect(canvas, "classical");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not read that photo.");
-      setStage("pick");
+      const { extractDocument } = await getScanic();
+      const res = await extractDocument(canvas, corners, { output: "canvas" });
+      const out = res.output as HTMLCanvasElement | null;
+      if (!res.success || !out) {
+        setError(res.message || "Could not straighten that page.");
+        setMessage(null);
+        setStage("adjust");
+        return;
+      }
+      extractedRef.current = out;
       setMessage(null);
+      setStage("preview");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not process the page.");
+      setMessage(null);
+      setStage("adjust");
     }
   };
+
+  /* ---------- detect ---------- */
 
   const detect = async (canvas: HTMLCanvasElement, detector: "classical" | "ml") => {
     setStage("detect");
@@ -71,18 +91,39 @@ export function DocumentScanner({
         maxProcessingDimension: 1600,
       });
       setConfidence(typeof res.confidence === "number" ? res.confidence : null);
-      initCornersRef.current = res.corners ?? insetQuad(canvas);
-      if (!res.success) {
+      if (!res.success || !res.corners) {
+        initCornersRef.current = insetQuad(canvas);
+        setMessage(null);
         setError("Couldn't find the page edges — drag the corners to fit the form.");
+        setStage("adjust");
+        return;
       }
-      setMessage(null);
-      setStage("adjust");
+      initCornersRef.current = res.corners;
+      await extractWith(canvas, res.corners);
     } catch (e) {
       initCornersRef.current = insetQuad(canvas);
       setConfidence(null);
       setError(e instanceof Error ? `Auto-detect failed: ${e.message}` : "Auto-detect failed.");
       setMessage(null);
       setStage("adjust");
+    }
+  };
+
+  /* ---------- capture ---------- */
+
+  const acceptFile = async (file: File | null | undefined) => {
+    if (!file) return;
+    setError(null);
+    setStage("detect");
+    setMessage("Preparing photo…");
+    try {
+      const canvas = await fileToCanvas(file, 2000);
+      setSource(canvas);
+      await detect(canvas, "classical");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not read that photo.");
+      setStage("pick");
+      setMessage(null);
     }
   };
 
@@ -105,14 +146,14 @@ export function DocumentScanner({
           corners: initCornersRef.current ?? insetQuad(source),
           magnifier: { enabled: true, zoom: 2, size: 110 },
           nudges: { enabled: true, steps: [1, 5] },
-          theme: { accent: "#0f766e" },
+          theme: { accent: "#14b8a6" },
           onChange: (c) => {
             initCornersRef.current = c;
           },
           onCancel: () => onClose(),
           onConfirm: (c) => {
             initCornersRef.current = c;
-            void extract(c);
+            void extractWith(source, c);
           },
         });
       } catch (e) {
@@ -129,29 +170,6 @@ export function DocumentScanner({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, source]);
-
-  const extract = async (corners: CornerPoints) => {
-    if (!source) return;
-    setStage("detect");
-    setMessage("Straightening the page…");
-    setError(null);
-    try {
-      const { extractDocument } = await getScanic();
-      const res = await extractDocument(source, corners, { output: "canvas" });
-      const out = res.output as HTMLCanvasElement | null;
-      if (!res.success || !out) {
-        setError(res.message || "Could not straighten that page.");
-        setStage("adjust");
-        return;
-      }
-      extractedRef.current = out;
-      setMessage(null);
-      setStage("preview");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not process the page.");
-      setStage("adjust");
-    }
-  };
 
   /* ---------- preview ---------- */
 
@@ -184,79 +202,120 @@ export function DocumentScanner({
   const skipScan = () => {
     if (!source) return;
     extractedRef.current = source;
+    setError(null);
     setFilter("color");
     setStage("preview");
   };
 
-  const busy = stage === "detect";
+  const messageText = message;
 
   return (
-    <Modal title={title} onClose={onClose}>
-      <div className="space-y-3">
-        {error ? <p className="rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800">{error}</p> : null}
-        {message ? <p className="text-center text-sm font-medium text-slate-500">{message}</p> : null}
+    <div className="fixed inset-0 z-[70] flex flex-col bg-slate-950 text-white">
+      <div className="flex items-center justify-between px-4 pb-2 pt-3">
+        <p className="truncate text-sm font-semibold">{title}</p>
+        <button
+          onClick={onClose}
+          className="rounded-full p-2 text-slate-300 active:bg-white/10"
+          aria-label="Close scanner"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
 
-        {stage === "pick" || (stage === "detect" && !source) ? (
-          <>
-            <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-              Lay the filled GAIL form on a flat surface and photograph the whole page. You can
-              adjust the corners next, and the app will straighten it and make the text crisp.
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <Button onClick={() => cameraRef.current?.click()} disabled={busy}>
-                Take photo
-              </Button>
-              <Button variant="secondary" onClick={() => fileRef.current?.click()} disabled={busy}>
-                Upload
-              </Button>
-            </div>
-          </>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+        {error ? (
+          <p className="mb-2 rounded-xl bg-amber-500/15 p-2.5 text-xs text-amber-200">{error}</p>
         ) : null}
 
-        {stage === "detect" && source ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-slate-500">
-            <div className="h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-brand-600" />
+        {messageText ? (
+          <p className="mb-2 text-center text-sm font-medium text-slate-300">{messageText}</p>
+        ) : null}
+
+        {stage === "pick" ? (
+          <div className="flex h-full min-h-[46vh] flex-col items-center justify-center gap-3 text-center">
+            <div className="rounded-full bg-white/10 p-4">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M4 8V5h3M20 8V5h-3M4 16v3h3M20 16v3h-3" strokeLinecap="round" />
+                <path d="M4 12h16" strokeLinecap="round" opacity="0.35" />
+              </svg>
+            </div>
+            <p className="max-w-xs text-sm leading-relaxed text-slate-300">
+              Lay the filled GAIL form on a flat surface and photograph the whole page. It will be
+              straightened automatically.
+            </p>
+          </div>
+        ) : null}
+
+        {stage === "detect" ? (
+          <div className="flex min-h-[46vh] flex-col items-center justify-center gap-2 text-sm text-slate-400">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-teal-400" />
             <span>Working…</span>
           </div>
         ) : null}
 
         {stage === "adjust" ? (
           <>
-            <p className="text-xs text-slate-500">
+            <p className="mb-2 text-center text-xs text-slate-400">
               Drag the four corners to the edges of the form.
               {confidence != null ? ` Auto-detect ${Math.round(confidence * 100)}%.` : ""}
             </p>
-            <div
-              ref={editorHost}
-              className="relative w-full overflow-hidden rounded-xl bg-slate-900"
-              style={{ minHeight: 340 }}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={() => source && detect(source, "ml")} className="flex-1 text-xs">
-                Better detection
-              </Button>
-              <Button variant="ghost" onClick={skipScan} className="flex-1 text-xs">
-                Use photo as-is
-              </Button>
-            </div>
-            <p className="text-center text-[11px] text-slate-400">
-              "Better detection" downloads a small extra model the first time.
-            </p>
+            <div ref={editorHost} className="relative w-full overflow-hidden rounded-xl bg-slate-900" style={{ minHeight: 420 }} />
           </>
         ) : null}
 
         {stage === "preview" ? (
+          <div className="flex h-full min-h-[46vh] items-center justify-center">
+            <canvas ref={previewRef} className="block max-h-full w-auto max-w-full rounded-lg" />
+          </div>
+        ) : null}
+      </div>
+
+      <div className="border-t border-white/10 px-4 pb-3 pt-3">
+        {stage === "pick" ? (
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => cameraRef.current?.click()}
+              className="rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white active:bg-brand-700"
+            >
+              Take photo
+            </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="rounded-xl bg-white/10 py-3 text-sm font-semibold text-white active:bg-white/20"
+            >
+              Upload
+            </button>
+          </div>
+        ) : null}
+
+        {stage === "adjust" ? (
+          <div className="flex gap-2">
+            <button
+              onClick={skipScan}
+              className="flex-1 rounded-xl bg-white/10 py-2.5 text-xs font-semibold text-white active:bg-white/20"
+            >
+              Use photo as-is
+            </button>
+            <button
+              onClick={() => source && detect(source, "ml")}
+              className="flex-1 rounded-xl bg-white/10 py-2.5 text-xs font-semibold text-white active:bg-white/20"
+            >
+              Better detection
+            </button>
+          </div>
+        ) : null}
+
+        {stage === "preview" ? (
           <>
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-              <canvas ref={previewRef} className="block h-auto w-full" />
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="mb-2 grid grid-cols-3 gap-1.5">
               {FILTERS.map((f) => (
                 <button
                   key={f.id}
                   onClick={() => setFilter(f.id)}
                   className={`rounded-xl py-2 text-xs font-semibold ${
-                    filter === f.id ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"
+                    filter === f.id ? "bg-white text-slate-900" : "bg-white/10 text-slate-200"
                   }`}
                 >
                   {f.label}
@@ -264,39 +323,52 @@ export function DocumentScanner({
               ))}
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setStage("adjust")} className="flex-1">
-                Corners
-              </Button>
-              <Button onClick={useScan} disabled={!!message} className="flex-1">
-                Use this scan
-              </Button>
+              <button
+                onClick={reset}
+                className="flex-1 rounded-xl bg-white/10 py-3 text-sm font-semibold text-white active:bg-white/20"
+              >
+                Retake
+              </button>
+              <button
+                onClick={() => setStage("adjust")}
+                className="flex-1 rounded-xl bg-white/10 py-3 text-sm font-semibold text-white active:bg-white/20"
+              >
+                Adjust
+              </button>
+              <button
+                onClick={useScan}
+                disabled={!!message}
+                className="flex-[1.4] rounded-xl bg-brand-600 py-3 text-sm font-semibold text-white active:bg-brand-700 disabled:opacity-50"
+              >
+                Use scan
+              </button>
             </div>
           </>
         ) : null}
-
-        <input
-          ref={cameraRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={(e) => {
-            acceptFile(e.target.files?.[0]);
-            e.target.value = "";
-          }}
-        />
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={(e) => {
-            acceptFile(e.target.files?.[0]);
-            e.target.value = "";
-          }}
-        />
       </div>
-    </Modal>
+
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          acceptFile(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          acceptFile(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
+    </div>
   );
 }
 

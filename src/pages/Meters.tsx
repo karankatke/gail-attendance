@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Empty, Modal, Spinner } from "../components/ui";
 import { useTable } from "../hooks/useTable";
 import { flatSort, meterPhotoUrl } from "../lib/meters";
-import { buildFlatPdf, buildSitePdf, pdfFileName, sharePdf } from "../lib/pdf";
+import { buildFormPdf, buildMeterPhotoPdf, buildSitePdf, pdfFileName, sharePdf } from "../lib/pdf";
 import type { MeterFlatRow, MeterRecord, SiteFlat, WorkLocation } from "../lib/types";
 
 export function MetersPage() {
@@ -44,14 +44,17 @@ export function MetersPage() {
     );
   }
 
-  const siteIds = Array.from(flatsBySite.keys()).sort((a, b) => {
-    const na = locations.find((l) => l.id === a)?.name ?? "";
-    const nb = locations.find((l) => l.id === b)?.name ?? "";
-    return na.localeCompare(nb);
-  });
+  const siteIds = locations
+    .filter((l) => l.active || flatsBySite.has(l.id))
+    .map((l) => l.id)
+    .sort((a, b) => {
+      const na = locations.find((l) => l.id === a)?.name ?? "";
+      const nb = locations.find((l) => l.id === b)?.name ?? "";
+      return na.localeCompare(nb);
+    });
 
   if (siteIds.length === 0) {
-    return <Empty title="No meter flat lists yet" hint="Flat lists are imported per site." />;
+    return <Empty title="No sites yet" hint="Add a site under Sites to start recording meters." />;
   }
 
   return (
@@ -171,7 +174,7 @@ function SiteMeters({
 
 function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
   const [thumb, setThumb] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"form" | "meter" | null>(null);
   const [open, setOpen] = useState(false);
   const done = row.record?.status === "done";
 
@@ -185,14 +188,17 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
     };
   }, [row.record?.meter_photo_path]);
 
-  const pdf = async () => {
+  const pdf = async (kind: "form" | "meter") => {
     if (!row.record) return;
-    setBusy(true);
+    setBusy(kind);
     try {
-      const doc = await buildFlatPdf(siteName, row.flat, row.record);
-      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number));
+      const doc =
+        kind === "form"
+          ? await buildFormPdf(siteName, row.flat, row.record)
+          : await buildMeterPhotoPdf(siteName, row.flat, row.record);
+      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, kind));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -225,11 +231,18 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
             View
           </button>
           <button
-            onClick={pdf}
-            disabled={busy}
-            className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
+            onClick={() => pdf("form")}
+            disabled={!!busy || !row.record?.form_photo_path}
+            className="rounded-lg bg-slate-100 px-2 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
           >
-            {busy ? "…" : "PDF"}
+            {busy === "form" ? "…" : "Form"}
+          </button>
+          <button
+            onClick={() => pdf("meter")}
+            disabled={!!busy || !row.record?.meter_photo_path}
+            className="rounded-lg bg-slate-100 px-2 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
+          >
+            {busy === "meter" ? "…" : "Meter"}
           </button>
         </div>
       ) : (
@@ -256,7 +269,7 @@ function MeterViewer({
   const [meter, setMeter] = useState<string | null>(null);
   const [valve, setValve] = useState<string | null>(null);
   const [form, setForm] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"form" | "meter" | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
 
   useEffect(() => {
@@ -276,14 +289,14 @@ function MeterViewer({
     };
   }, [rec?.meter_photo_path, rec?.valve_photo_path, rec?.form_photo_path]);
 
-  const pdf = async () => {
+  const pdf = async (kind: "form" | "meter") => {
     if (!rec) return;
-    setBusy(true);
+    setBusy(kind);
     try {
-      const doc = await buildFlatPdf(siteName, row.flat, rec);
-      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number));
+      const doc = kind === "form" ? await buildFormPdf(siteName, row.flat, rec) : await buildMeterPhotoPdf(siteName, row.flat, rec);
+      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, kind));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -313,7 +326,7 @@ function MeterViewer({
 
             <div className="grid grid-cols-2 gap-2">
               <PhotoTile label="Meter photo" url={meter} onZoom={setZoom} />
-              <PhotoTile label="Valve / regulator" url={valve} onZoom={setZoom} />
+              <PhotoTile label="Stove photo (on)" url={valve} onZoom={setZoom} />
             </div>
 
             <div>
@@ -331,9 +344,24 @@ function MeterViewer({
               </button>
             </div>
 
-            <Button onClick={pdf} disabled={busy} className="w-full">
-              {busy ? "Building…" : "Download PDF"}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => pdf("form")}
+                disabled={!!busy || !rec.form_photo_path}
+                className="flex-1 text-xs"
+              >
+                {busy === "form" ? "Building…" : "GAIL form PDF"}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => pdf("meter")}
+                disabled={!!busy || !rec.meter_photo_path}
+                className="flex-1 text-xs"
+              >
+                {busy === "meter" ? "Building…" : "Meter photo PDF"}
+              </Button>
+            </div>
           </>
         ) : (
           <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
