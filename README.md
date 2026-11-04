@@ -2,7 +2,9 @@
 
 A phone-first attendance register for laborers working across multiple sites, with two kinds of users:
 
-- **Owner** (you) — sees everything: headcount, workers, sites, wages and reports.
+- **Owner** (you) - sees everything: headcount, workers, sites, wages and reports. The bottom bar has
+  four tabs: **Home, Reports, Meters, More**. Workers, sites, roles and access live inside
+  **More → People / Sites / Admin** as collapsed sections, so the page stays short.
 - **Supervisor** — marks attendance and enters **bata** (site cash) from their own phone. They never see
   rates, wages, or other supervisors' data (enforced in the database with Row Level Security).
 

@@ -6,10 +6,8 @@ import { LoginScreen } from "./components/LoginScreen";
 import { SetupScreen } from "./components/SetupScreen";
 import { Spinner } from "./components/ui";
 import { HomePage } from "./pages/Home";
-import { WorkersPage } from "./pages/Workers";
-import { SitesPage } from "./pages/Sites";
 import { ReportsPage } from "./pages/Reports";
-import { SettingsPage } from "./pages/Settings";
+import { MorePage } from "./pages/Settings";
 import { SupervisorAttendancePage } from "./pages/SupervisorAttendance";
 import { BataPage } from "./pages/Bata";
 import { MeterDetailsPage } from "./pages/MeterDetails";
@@ -17,11 +15,9 @@ import { MetersPage } from "./pages/Meters";
 
 const OWNER_TITLES: Record<string, { title: string; subtitle?: string }> = {
   home: { title: "Home", subtitle: "Today at a glance" },
-  workers: { title: "Workers", subtitle: "People and their rates" },
-  sites: { title: "Sites", subtitle: "Where work happens" },
   reports: { title: "Reports", subtitle: "Wages, payments & bata" },
   meters: { title: "Meter details", subtitle: "Gas meter records per site" },
-  settings: { title: "More", subtitle: "Roles, access, settings" },
+  settings: { title: "More", subtitle: "People, sites, rates & access" },
 };
 
 const SUPERVISOR_TITLES: Record<string, { title: string; subtitle?: string }> = {
@@ -36,11 +32,9 @@ function OwnerApp() {
   return (
     <Layout tabs={OWNER_TABS} tab={tab} onTab={setTab} title={meta.title} subtitle={meta.subtitle}>
       {tab === "home" ? <HomePage /> : null}
-      {tab === "workers" ? <WorkersPage /> : null}
-      {tab === "sites" ? <SitesPage /> : null}
       {tab === "reports" ? <ReportsPage /> : null}
       {tab === "meters" ? <MetersPage /> : null}
-      {tab === "settings" ? <SettingsPage /> : null}
+      {tab === "settings" ? <MorePage /> : null}
     </Layout>
   );
 }

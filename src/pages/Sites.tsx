@@ -1,26 +1,32 @@
 import { useState } from "react";
 import { Button, Card, Empty, Field, Modal, Spinner, inputClass } from "../components/ui";
-import { useTable } from "../hooks/useTable";
 import { insertRow, removeRow, updateRow } from "../lib/db";
 import type { WorkLocation } from "../lib/types";
 
-export function SitesPage() {
-  const { rows, loading, refetch } = useTable<WorkLocation>("locations", { orderColumn: "name" });
+export function SitesSection({
+  sites,
+  loading,
+  onRefetch,
+}: {
+  sites: WorkLocation[];
+  loading: boolean;
+  onRefetch: () => Promise<void> | void;
+}) {
   const [editing, setEditing] = useState<WorkLocation | "new" | null>(null);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <Button onClick={() => setEditing("new")} className="w-full">
         + Add site
       </Button>
 
       {loading ? (
         <Spinner />
-      ) : rows.length === 0 ? (
+      ) : sites.length === 0 ? (
         <Empty title="No sites yet" hint="Add the locations where work happens." />
       ) : (
         <div className="space-y-2">
-          {rows.map((l) => (
+          {sites.map((l) => (
             <Card key={l.id} className="p-3">
               <button onClick={() => setEditing(l)} className="flex w-full items-center justify-between text-left">
                 <div className="min-w-0">
@@ -43,7 +49,7 @@ export function SitesPage() {
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
-            await refetch();
+            await onRefetch();
           }}
         />
       ) : null}

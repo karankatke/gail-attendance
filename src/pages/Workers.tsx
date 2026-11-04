@@ -1,17 +1,24 @@
 import { useMemo, useState } from "react";
 import { Button, Card, Empty, Field, Modal, Spinner, inputClass } from "../components/ui";
-import { useTable } from "../hooks/useTable";
 import { insertRow, removeRow, updateRow } from "../lib/db";
 import { formatINR, formatRate, hasCustomRate, hasEffectiveRate } from "../lib/pay";
 import type { Profile, RateMode, Role, Worker } from "../lib/types";
 
-export function WorkersPage() {
-  const { rows: workers, loading, refetch } = useTable<Worker>("workers", { orderColumn: "name" });
-  const { rows: roles } = useTable<Role>("roles", { orderColumn: "name" });
-  const { rows: profiles, refetch: refetchProfiles } = useTable<Profile>("profiles", {
-    orderColumn: "display_name",
-  });
+export function WorkersSection({
+  workers,
+  roles,
+  profiles,
+  loading,
+  onRefetch,
+}: {
+  workers: Worker[];
+  roles: Role[];
+  profiles: Profile[];
+  loading: boolean;
+  onRefetch: () => Promise<void> | void;
+}) {
   const [editing, setEditing] = useState<Worker | "new" | null>(null);
+  const [query, setQuery] = useState("");
 
   const roleById = useMemo(() => {
     const m: Record<string, Role> = {};
@@ -30,6 +37,15 @@ export function WorkersPage() {
     [workers],
   );
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter((w) => {
+      const role = w.role_id ? roleById[w.role_id] : null;
+      return w.name.toLowerCase().includes(q) || (role?.name ?? "").toLowerCase().includes(q);
+    });
+  }, [sorted, query, roleById]);
+
   const needsRate = useMemo(
     () =>
       sorted.filter(
@@ -40,15 +56,14 @@ export function WorkersPage() {
 
   const onSaved = async () => {
     setEditing(null);
-    await refetch();
-    await refetchProfiles();
+    await onRefetch();
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {needsRate.length > 0 ? (
         <div>
-          <p className="mb-2 px-1 text-sm font-medium text-amber-700">
+          <p className="mb-2 text-sm font-medium text-amber-700">
             New workers — set their rate ({needsRate.length})
           </p>
           <div className="space-y-2">
@@ -80,13 +95,22 @@ export function WorkersPage() {
         + Add worker
       </Button>
 
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search worker or role"
+        className={`${inputClass} py-2 text-sm`}
+      />
+
       {loading ? (
         <Spinner />
       ) : sorted.length === 0 ? (
         <Empty title="No workers yet" hint="Tap “Add worker” to get started." />
+      ) : filtered.length === 0 ? (
+        <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">No worker matches that search.</p>
       ) : (
         <div className="space-y-2">
-          {sorted.map((w) => {
+          {filtered.map((w) => {
             const role = w.role_id ? roleById[w.role_id] : null;
             const by = w.added_by_profile_id ? addedByName[w.added_by_profile_id] : null;
             return (
