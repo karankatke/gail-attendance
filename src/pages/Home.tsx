@@ -111,6 +111,7 @@ export function HomePage() {
   }, [rows]);
 
   const headcount = totals.present + totals.half;
+  const isToday = date === todayISO();
 
   return (
     <div className="space-y-4">
@@ -152,7 +153,9 @@ export function HomePage() {
         <Card className="p-3">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <p className="text-xs font-medium text-slate-500">Spent today</p>
+              <p className="text-xs font-medium text-slate-500">
+                {isToday ? "Spent today" : "Cost for the day"}
+              </p>
               <p className="text-2xl font-bold text-slate-900">
                 {formatINR(cost.wages + cost.bata)}
               </p>
