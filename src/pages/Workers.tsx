@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Button, Card, Empty, Field, Modal, Spinner, inputClass } from "../components/ui";
 import { useTable } from "../hooks/useTable";
 import { insertRow, removeRow, updateRow } from "../lib/db";
-import { formatRate } from "../lib/pay";
+import { formatINR, formatRate, hasCustomRate, hasEffectiveRate } from "../lib/pay";
 import type { Profile, RateMode, Role, Worker } from "../lib/types";
 
 export function WorkersPage() {
@@ -30,7 +30,13 @@ export function WorkersPage() {
     [workers],
   );
 
-  const needsRate = useMemo(() => sorted.filter((w) => w.active && w.needs_rate), [sorted]);
+  const needsRate = useMemo(
+    () =>
+      sorted.filter(
+        (w) => w.active && !hasEffectiveRate(w, w.role_id ? roleById[w.role_id] ?? null : null),
+      ),
+    [sorted, roleById],
+  );
 
   const onSaved = async () => {
     setEditing(null);
@@ -90,7 +96,7 @@ export function WorkersPage() {
                     <p className="truncate font-semibold text-slate-900">
                       {w.name}
                       {!w.active ? <span className="ml-2 text-xs font-normal text-slate-400">inactive</span> : null}
-                      {w.needs_rate ? (
+                      {!hasEffectiveRate(w, role) ? (
                         <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                           needs rate
                         </span>
@@ -98,6 +104,13 @@ export function WorkersPage() {
                     </p>
                     <p className="truncate text-xs text-slate-500">
                       {role?.name ?? "No role"} · {formatRate(w, role)}
+                      {hasCustomRate(w) ? (
+                        <span className="ml-1.5 rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-700">
+                          custom
+                        </span>
+                      ) : (
+                        <span className="ml-1.5 text-[10px] text-slate-400">role rate</span>
+                      )}
                       {by ? ` · added by ${by}` : ""}
                     </p>
                   </div>
@@ -142,6 +155,14 @@ function WorkerForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const role = roleId ? roles.find((r) => r.id === roleId) ?? null : null;
+  const roleDay = role ? Number(role.day_rate) : 0;
+  const roleMonth = role ? Number(role.month_rate) : 0;
+  const overrideValue = rateMode === "day" ? dayRate.trim() : monthRate.trim();
+  const roleDefault = rateMode === "day" ? roleDay : roleMonth;
+  const hasRateNow = overrideValue !== "" ? Number(overrideValue) > 0 : roleDefault > 0;
+  const usingRoleDefault = overrideValue === "" && roleDefault > 0;
+
   const save = async () => {
     if (!name.trim()) {
       setError("Name is required.");
@@ -184,10 +205,11 @@ function WorkerForm({
   return (
     <Modal title={worker ? "Edit worker" : "Add worker"} onClose={onClose}>
       <div className="space-y-4">
-        {worker?.needs_rate ? (
+        {!hasRateNow ? (
           <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
-            {worker.added_by_profile_id ? "Added by a supervisor. " : ""}
-            Set the pay basis and rate below, then save.
+            {worker?.added_by_profile_id ? "Added by a supervisor. " : ""}
+            This role has no rate yet. Enter a custom rate below, or set the role’s base rate in More →
+            Roles.
           </p>
         ) : null}
 
@@ -226,15 +248,50 @@ function WorkerForm({
           </div>
         </Field>
 
-        {rateMode === "day" ? (
-          <Field label="Day rate override (₹)" hint="blank = use the role's day rate">
-            <input inputMode="decimal" value={dayRate} onChange={(e) => setDayRate(e.target.value)} className={inputClass} placeholder="—" />
-          </Field>
-        ) : (
-          <Field label="Month rate override (₹)" hint="blank = use the role's month rate">
-            <input inputMode="decimal" value={monthRate} onChange={(e) => setMonthRate(e.target.value)} className={inputClass} placeholder="—" />
-          </Field>
-        )}
+        <Field
+          label={rateMode === "day" ? "Custom day rate (₹)" : "Custom month rate (₹)"}
+          hint={
+            roleDefault > 0
+              ? `Leave blank to use ${formatINR(roleDefault)}/${rateMode === "day" ? "day" : "month"} from ${role?.name ?? "the role"}.`
+              : "No role rate yet — enter a rate or set the role’s base rate in More → Roles."
+          }
+        >
+          {rateMode === "day" ? (
+            <input
+              inputMode="decimal"
+              value={dayRate}
+              onChange={(e) => setDayRate(e.target.value)}
+              className={inputClass}
+              placeholder={roleDefault > 0 ? String(roleDefault) : "—"}
+            />
+          ) : (
+            <input
+              inputMode="decimal"
+              value={monthRate}
+              onChange={(e) => setMonthRate(e.target.value)}
+              className={inputClass}
+              placeholder={roleDefault > 0 ? String(roleDefault) : "—"}
+            />
+          )}
+        </Field>
+        <div className="flex items-center justify-between gap-2 text-[11px]">
+          <span className={usingRoleDefault ? "text-slate-400" : overrideValue ? "text-brand-700" : "text-amber-700"}>
+            {usingRoleDefault
+              ? `Using role rate ${formatINR(roleDefault)}/${rateMode === "day" ? "day" : "month"}`
+              : overrideValue
+                ? "Using a custom rate"
+                : "No rate set"}
+          </span>
+          {overrideValue !== "" ? (
+            <button
+              type="button"
+              onClick={() => (rateMode === "day" ? setDayRate("") : setMonthRate(""))}
+              className="shrink-0 font-semibold text-brand-700"
+            >
+              Use role default
+            </button>
+          ) : null}
+        </div>
 
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="h-4 w-4" />

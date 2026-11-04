@@ -15,15 +15,19 @@ No app to install — it's just a website; add it to the home screen if you like
   their own entry. Supervisors never mark each other.
 - Supervisors can **add a worker** (name + role only) when someone new shows up on site; the owner is
   prompted to set that worker's rate, and the worker shows **who added them**.
-- Day-rate **and** month-rate workers; rates per work type (role) with per-worker overrides.
+- Day-rate **and** month-rate workers. Each worker uses their **role's base rate** (Plumber ₹1,000/day,
+  Mason ₹1,200/day, etc.) unless a custom rate is set for that person; changing a role rate updates
+  everyone without a custom rate. Reports, Today and the budget all use the same effective rate.
 - **Bata**: owner hands cash to a supervisor; the supervisor records the breakdown (lunch, travel/tempo,
   material, other) and the owner sees it in reports as a separate "misc" line.
 - **Reports**: live current week, a week list with tap-to-view summaries, and a monthly view that
-  includes monthly-salaried workers. A **Today's summary** popup shows today's total wages and the
-  headcount for each site. Workers are a compact searchable list; tap one to open a bottom sheet with
-  a **week strip and month calendar** of attendance, wages for the selected range, and the last six
-  months at a glance. Payments, cost by site, bata and past weeks are collapsible sections.
-  Advances / deductions / bonuses are editable from a list.
+  includes monthly-salaried workers. A **Today's summary** popup shows today's total wages, the
+  headcount by site, and a per-worker breakdown. Workers are a compact searchable list; tap one to open
+  a bottom sheet with a **week strip and month calendar** of attendance, wages for the selected range,
+  and the last six months at a glance. A **Budget & trend** card compares the last eight weeks (wages
+  plus bata by lunch/travel/material/other) against a provisional baseline, with a ₹ / per-worker-day
+  toggle. Payments, cost by site, bata and past weeks are collapsible sections, and a **legend** explains
+  every number. Advances / deductions / bonuses are editable from a list.
 - Owner home shows a read-only per-site headcount for the day with the marker's name.
 - **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the **meter number**
   and **initial meter reading**, meter make, work date, remarks and two photos (meter, stove) — each
@@ -137,8 +141,21 @@ Table | Purpose
 `meter_records` | One meter record per flat (number, readings, make, photos, form scan, status)
 
 Report functions: `report_range(from,to,include_monthly)`, `report_by_location(from,to)`,
-`report_bata(from,to)`. Access helpers: `login_directory()`, `request_access`, `approve_access`,
-`reject_access`, `public_workers()`, `is_owner()`, `current_profile_id()`.
+`report_bata(from,to)`, `worker_monthly_accrual(worker,from,to)`. Access helpers: `login_directory()`,
+`request_access`, `approve_access`, `reject_access`, `public_workers()`, `is_owner()`,
+`current_profile_id()`.
+
+### Wage calculations
+`supabase/report_functions.sql` is the source of truth.
+
+- **Rate**: a worker uses their own rate when set, otherwise their role's base rate.
+- **Day**: present = rate, half day = 50%, absent = 0. A `pay_overrides` row for that worker/date
+  replaces the calculated day amount.
+- **Month**: the salary is spread across the days of the month, capped at today (IST), and only for
+  months where the worker has attendance. A single day is therefore `month_rate / days_in_month`, not
+  the whole salary. The `include_monthly` flag is kept for compatibility but is ignored.
+- **Gross** = day pay + monthly accrual. **Net** = gross − advances − deductions + bonuses.
+- **Bata** is separate from wages; the budget uses **spent**, not granted.
 
 ### Meter photos
 Private Supabase Storage bucket `meter-photos`, paths `{location}/{flat}/meter.jpg`, `.../valve.jpg`
@@ -147,7 +164,7 @@ the form scan goes through the scanner cleanup first. The app reads them back th
 URLs. The scanner is `scanic` (MIT, ~43 KB gzipped) and is lazy-loaded only when a supervisor opens it.
 
 Supervisors can edit or delete only **manual** flats (never imported rows), and only while the flat has
-no meter record. Apply `supabase/manual_flat_policies.sql` once in the SQL editor to enable that.
+no meter record. The policy is applied; `supabase/manual_flat_policies.sql` documents it.
 
 ## Security notes
 - Row Level Security is on for every table. Supervisors can read locations and attendance and write

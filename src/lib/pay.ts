@@ -14,6 +14,18 @@ export function effectiveMonthRate(worker: Worker, role: Role | null): number {
   return num(worker.month_rate) ?? num(role?.month_rate) ?? 0;
 }
 
+/** True when the worker or their role provides a usable rate for their pay basis. */
+export function hasEffectiveRate(worker: Worker, role: Role | null): boolean {
+  return worker.rate_mode === "month"
+    ? effectiveMonthRate(worker, role) > 0
+    : effectiveDayRate(worker, role) > 0;
+}
+
+/** True when the rate is a worker-level override rather than the role default. */
+export function hasCustomRate(worker: Worker): boolean {
+  return worker.rate_mode === "month" ? worker.month_rate != null : worker.day_rate != null;
+}
+
 /**
  * Suggested pay for a single day.
  * - month mode: daily entries do not accrue daily pay (paid via the monthly rate)

@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, Card, Field, Modal, Spinner, inputClass } from "../components/ui";
 import { WorkerReportSheet } from "../components/WorkerReport";
+import { LegendLink, LegendModal } from "../components/Legend";
+import { BudgetSection, shortWeekLabel, type BudgetWeek } from "../components/Budget";
 import { useTable } from "../hooks/useTable";
 import { requireClient } from "../lib/supabase";
 import { fetchDayAttendance, insertRow, removeRow, updateRow } from "../lib/db";
@@ -32,6 +34,13 @@ interface TodaySummary {
   wages: number;
   onSite: number;
   sites: { name: string; count: number }[];
+  workers: {
+    name: string;
+    amount: number;
+    daysPresent: number;
+    daysHalf: number;
+    monthly: boolean;
+  }[];
 }
 
 const TYPE_LABEL: Record<AdjustmentType, string> = {
@@ -59,6 +68,11 @@ export function ReportsPage() {
   const [todayError, setTodayError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectedWorker, setSelectedWorker] = useState<ReportRow | null>(null);
+  const [legendOpen, setLegendOpen] = useState(false);
+  const [budgetWeeks, setBudgetWeeks] = useState<BudgetWeek[]>([]);
+  const [budgetLoading, setBudgetLoading] = useState(true);
+  const [plannedWorkerDays, setPlannedWorkerDays] = useState(0);
+  const plannedTouched = useRef(false);
 
   const { rows: workers } = useTable<Worker>("workers", { orderColumn: "name" });
   const { rows: locations } = useTable<WorkLocation>("locations", { orderColumn: "name" });
@@ -105,10 +119,18 @@ export function ReportsPage() {
         client.rpc("report_range", { p_from: today, p_to: today, p_include_monthly: true }),
         fetchDayAttendance(today),
       ]);
-      const wages = ((rep.data ?? []) as ReportRow[]).reduce(
-        (sum, r) => sum + Number(r.gross_pay),
-        0,
-      );
+      const reportRows = (rep.data ?? []) as ReportRow[];
+      const wages = reportRows.reduce((sum, r) => sum + Number(r.gross_pay), 0);
+      const workersToday = reportRows
+        .filter((r) => Number(r.gross_pay) > 0)
+        .map((r) => ({
+          name: r.worker_name,
+          amount: Number(r.gross_pay),
+          daysPresent: r.days_present,
+          daysHalf: r.days_half,
+          monthly: r.rate_mode === "month",
+        }))
+        .sort((a, b) => b.amount - a.amount);
       const bySite = new Map<string, { name: string; count: number }>();
       let onSite = 0;
       for (const row of day) {
@@ -122,6 +144,7 @@ export function ReportsPage() {
       setTodaySummary({
         wages,
         onSite,
+        workers: workersToday,
         sites: [...bySite.values()].sort(
           (a, b) => b.count - a.count || a.name.localeCompare(b.name),
         ),
@@ -148,6 +171,90 @@ export function ReportsPage() {
       client.removeChannel(channel);
     };
   }, [load, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    setBudgetLoading(true);
+    (async () => {
+      const client = requireClient();
+      const thisWeek = weekRange(todayISO());
+      const first = await client
+        .from("attendance")
+        .select("work_date")
+        .order("work_date", { ascending: true })
+        .limit(1);
+      const dataStart =
+        ((first.data ?? []) as { work_date: string }[])[0]?.work_date ?? null;
+      const ranges = Array.from({ length: 8 }, (_, i) => {
+        const idx = 7 - i;
+        const from = addDays(thisWeek.from, -7 * idx);
+        return { from, to: addDays(from, 6), current: idx === 0 };
+      });
+      const weeks = await Promise.all(
+        ranges.map(async (r) => {
+          const [rep, bata, att] = await Promise.all([
+            client.rpc("report_range", { p_from: r.from, p_to: r.to, p_include_monthly: true }),
+            client.rpc("report_bata", { p_from: r.from, p_to: r.to }),
+            client
+              .from("attendance")
+              .select("id", { count: "exact", head: true })
+              .gte("work_date", r.from)
+              .lte("work_date", r.to),
+          ]);
+          const rows = (rep.data ?? []) as ReportRow[];
+          const b = (bata.data ?? []) as BataReportRow[];
+          return {
+            from: r.from,
+            to: r.to,
+            label: shortWeekLabel(r.from),
+            workerDays: att.count ?? 0,
+            wages: rows.reduce((s, x) => s + Number(x.gross_pay), 0),
+            bata: b.reduce((s, x) => s + Number(x.spent), 0),
+            lunch: b.reduce((s, x) => s + Number(x.lunch), 0),
+            travel: b.reduce((s, x) => s + Number(x.travel), 0),
+            material: b.reduce((s, x) => s + Number(x.material), 0),
+            other: b.reduce((s, x) => s + Number(x.other), 0),
+            current: r.current,
+            partial: dataStart ? r.from < dataStart : false,
+          } satisfies BudgetWeek;
+        }),
+      );
+      if (!active) return;
+      setBudgetWeeks(weeks);
+      setBudgetLoading(false);
+    })().catch(() => {
+      if (active) setBudgetLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [refreshKey]);
+
+  const baseline = useMemo(() => {
+    const complete = budgetWeeks
+      .filter((w) => !w.current && !w.partial && w.workerDays > 0)
+      .slice(-4);
+    const wd = complete.reduce((s, w) => s + w.workerDays, 0);
+    return {
+      count: complete.length,
+      wagePerDay: wd ? complete.reduce((s, w) => s + w.wages, 0) / wd : 0,
+      bataPerDay: wd ? complete.reduce((s, w) => s + w.bata, 0) / wd : 0,
+    };
+  }, [budgetWeeks]);
+
+  useEffect(() => {
+    if (plannedTouched.current || baseline.count === 0) return;
+    const complete = budgetWeeks
+      .filter((w) => !w.current && !w.partial && w.workerDays > 0)
+      .slice(-4);
+    const avg = complete.reduce((s, w) => s + w.workerDays, 0) / complete.length;
+    setPlannedWorkerDays(Math.max(1, Math.round(avg)));
+  }, [budgetWeeks, baseline.count]);
+
+  const changePlanned = (n: number) => {
+    plannedTouched.current = true;
+    setPlannedWorkerDays(n);
+  };
 
   const workerName = useMemo(() => {
     const m: Record<string, string> = {};
@@ -227,13 +334,25 @@ export function ReportsPage() {
           </button>
         </div>
         <p className="mt-1 text-center text-[11px] text-slate-400">
-          {range.from} → {range.to}
-          {mode === "month" ? " · includes monthly salaried" : ""}
+          {range.from} → {range.to} · monthly salaries spread over the month
         </p>
         <Button variant="secondary" onClick={openToday} className="mt-2 w-full py-2 text-xs">
           Today's summary
         </Button>
+        <div className="mt-1.5 text-center">
+          <LegendLink onClick={() => setLegendOpen(true)} />
+        </div>
       </Card>
+
+      <BudgetSection
+        weeks={budgetWeeks}
+        loading={budgetLoading}
+        plannedWorkerDays={plannedWorkerDays}
+        onPlannedChange={changePlanned}
+        baselineWagePerDay={baseline.wagePerDay}
+        baselineBataPerDay={baseline.bataPerDay}
+        baselineWeekCount={baseline.count}
+      />
 
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Gross wages" value={formatINR(totals.gross)} />
@@ -455,10 +574,44 @@ export function ReportsPage() {
                   </div>
                 )}
               </div>
+              <div>
+                <p className="mb-2 text-sm font-medium text-slate-500">Who makes up the total</p>
+                {todaySummary.workers.length === 0 ? (
+                  <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">
+                    No wages recorded today yet.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {todaySummary.workers.map((w, i) => (
+                      <div
+                        key={`${w.name}-${i}`}
+                        className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-slate-700">{w.name}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {w.monthly
+                              ? "monthly · 1 day"
+                              : `${w.daysPresent}F${w.daysHalf ? ` · ${w.daysHalf}H` : ""}`}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-semibold text-slate-900">
+                          {formatINR(w.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="text-center">
+                <LegendLink onClick={() => setLegendOpen(true)} />
+              </div>
             </div>
           ) : null}
         </Modal>
       ) : null}
+
+      {legendOpen ? <LegendModal onClose={() => setLegendOpen(false)} /> : null}
       {selectedWorker ? (
         <WorkerReportSheet
           row={selectedWorker}
