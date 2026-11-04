@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, Spinner } from "../components/ui";
-import { useTable } from "../hooks/useTable";
 import { requireClient } from "../lib/supabase";
 import { fetchDayAttendance } from "../lib/db";
+import { formatINR } from "../lib/pay";
 import { addDays, prettyDate, todayISO } from "../lib/dates";
-import type { AttendanceStatus, DayAttendanceRow, WorkLocation } from "../lib/types";
+import type { AttendanceStatus, BataReportRow, DayAttendanceRow, ReportRow } from "../lib/types";
 
 const STATUS_LABEL: Record<AttendanceStatus, string> = {
   present: "Full",
@@ -18,15 +18,50 @@ const STATUS_PILL: Record<AttendanceStatus, string> = {
   absent: "bg-red-50 text-red-600",
 };
 
+type DayCost = {
+  wages: number;
+  bata: number;
+  lunch: number;
+  travel: number;
+  material: number;
+  other: number;
+};
+
 export function HomePage() {
   const [date, setDate] = useState(todayISO());
   const [rows, setRows] = useState<DayAttendanceRow[]>([]);
+  const [cost, setCost] = useState<DayCost>({
+    wages: 0,
+    bata: 0,
+    lunch: 0,
+    travel: 0,
+    material: 0,
+    other: 0,
+  });
   const [loading, setLoading] = useState(true);
-  const { rows: locations } = useTable<WorkLocation>("locations", { orderColumn: "name" });
 
   const load = useCallback(async () => {
+    const client = requireClient();
     try {
-      setRows(await fetchDayAttendance(date));
+      const [a, rep, bata] = await Promise.all([
+        fetchDayAttendance(date),
+        client.rpc("report_range", { p_from: date, p_to: date, p_include_monthly: true }),
+        client.rpc("report_bata", { p_from: date, p_to: date }),
+      ]);
+      setRows(a);
+      const wages = ((rep.data ?? []) as ReportRow[]).reduce(
+        (sum, r) => sum + Number(r.gross_pay),
+        0,
+      );
+      const b = (bata.data ?? []) as BataReportRow[];
+      setCost({
+        wages,
+        bata: b.reduce((s, x) => s + Number(x.spent), 0),
+        lunch: b.reduce((s, x) => s + Number(x.lunch), 0),
+        travel: b.reduce((s, x) => s + Number(x.travel), 0),
+        material: b.reduce((s, x) => s + Number(x.material), 0),
+        other: b.reduce((s, x) => s + Number(x.other), 0),
+      });
     } finally {
       setLoading(false);
     }
@@ -39,21 +74,30 @@ export function HomePage() {
     const channel = client
       .channel(`home-att-${date}-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "attendance" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "bata_expenses" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "workers" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pay_overrides" }, load)
       .subscribe();
     return () => {
       client.removeChannel(channel);
     };
   }, [date, load]);
 
-  const bySite = useMemo(() => {
-    const map = new Map<string, DayAttendanceRow[]>();
+  const siteGroups = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; rows: DayAttendanceRow[] }>();
     for (const r of rows) {
       const key = r.location_id ?? "__none__";
-      const list = map.get(key) ?? [];
-      list.push(r);
-      map.set(key, list);
+      const entry = map.get(key) ?? {
+        id: key,
+        name: key === "__none__" ? "Unassigned" : r.location_name ?? "No site",
+        rows: [],
+      };
+      entry.rows.push(r);
+      map.set(key, entry);
     }
-    return map;
+    return [...map.values()].sort(
+      (a, b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name),
+    );
   }, [rows]);
 
   const totals = useMemo(() => {
@@ -66,7 +110,6 @@ export function HomePage() {
     return t;
   }, [rows]);
 
-  const activeLocations = useMemo(() => locations.filter((l) => l.active), [locations]);
   const headcount = totals.present + totals.half;
 
   return (
@@ -105,6 +148,49 @@ export function HomePage() {
         <Stat label="Absent" value={String(totals.absent)} tone="red" />
       </div>
 
+      {!loading && (rows.length > 0 || cost.bata > 0) ? (
+        <Card className="p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium text-slate-500">Spent today</p>
+              <p className="text-2xl font-bold text-slate-900">
+                {formatINR(cost.wages + cost.bata)}
+              </p>
+            </div>
+            <div className="text-right text-[11px] text-slate-400">
+              <p>{headcount} on site</p>
+              <p>{prettyDate(date)}</p>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-xl bg-slate-50 p-2.5">
+              <p className="text-[10px] font-medium text-slate-400">Workers</p>
+              <p className="text-sm font-semibold text-slate-900">{formatINR(cost.wages)}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-2.5">
+              <p className="text-[10px] font-medium text-slate-400">Bata (site cash)</p>
+              <p className="text-sm font-semibold text-slate-900">{formatINR(cost.bata)}</p>
+            </div>
+          </div>
+          {cost.bata > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+              <span>
+                Lunch <b className="text-slate-700">{formatINR(cost.lunch)}</b>
+              </span>
+              <span>
+                Travel <b className="text-slate-700">{formatINR(cost.travel)}</b>
+              </span>
+              <span>
+                Material <b className="text-slate-700">{formatINR(cost.material)}</b>
+              </span>
+              <span>
+                Other <b className="text-slate-700">{formatINR(cost.other)}</b>
+              </span>
+            </div>
+          ) : null}
+        </Card>
+      ) : null}
+
       {loading ? (
         <Spinner />
       ) : rows.length === 0 ? (
@@ -114,13 +200,12 @@ export function HomePage() {
       ) : (
         <div className="space-y-2">
           <p className="px-1 text-sm font-medium text-slate-500">Marked by site</p>
-          {activeLocations.map((l) => {
-            const list = bySite.get(l.id) ?? [];
-            const total = list.filter((r) => r.status !== "absent").length;
+          {siteGroups.map((g) => {
+            const total = g.rows.filter((r) => r.status !== "absent").length;
             return (
-              <Card key={l.id} className="p-3">
+              <Card key={g.id} className="p-3">
                 <div className="flex items-center justify-between">
-                  <p className="truncate font-semibold text-slate-900">{l.name}</p>
+                  <p className="truncate font-semibold text-slate-900">{g.name}</p>
                   <span
                     className={`rounded-full px-3 py-1 text-sm font-semibold ${
                       total > 0 ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"
@@ -129,46 +214,24 @@ export function HomePage() {
                     {total}
                   </span>
                 </div>
-                {list.length > 0 ? (
-                  <div className="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
-                    {list.map((r) => (
-                      <div key={r.worker_id} className="flex items-center justify-between gap-2 text-sm">
-                        <p className="min-w-0 truncate text-slate-700">{r.worker_name}</p>
-                        <div className="flex shrink-0 items-center gap-2">
-                          <span className="text-[11px] text-slate-400">
-                            {r.marked_by_name ? `by ${r.marked_by_name}` : "—"}
-                          </span>
-                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_PILL[r.status]}`}>
-                            {STATUS_LABEL[r.status]}
-                          </span>
-                        </div>
+                <div className="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
+                  {g.rows.map((r) => (
+                    <div key={r.worker_id} className="flex items-center justify-between gap-2 text-sm">
+                      <p className="min-w-0 truncate text-slate-700">{r.worker_name}</p>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-[11px] text-slate-400">
+                          {r.marked_by_name ? `by ${r.marked_by_name}` : "—"}
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_PILL[r.status]}`}>
+                          {STATUS_LABEL[r.status]}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                ) : null}
+                    </div>
+                  ))}
+                </div>
               </Card>
             );
           })}
-          {(bySite.get("__none__") ?? []).length > 0 ? (
-            <Card className="p-3">
-              <p className="font-semibold text-slate-900">Unassigned</p>
-              <div className="mt-2 space-y-1.5 border-t border-slate-100 pt-2">
-                {(bySite.get("__none__") ?? []).map((r) => (
-                  <div key={r.worker_id} className="flex items-center justify-between gap-2 text-sm">
-                    <p className="min-w-0 truncate text-slate-700">{r.worker_name}</p>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-[11px] text-slate-400">
-                        {r.marked_by_name ? `by ${r.marked_by_name}` : "—"}
-                      </span>
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_PILL[r.status]}`}>
-                        {STATUS_LABEL[r.status]}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          ) : null}
         </div>
       )}
 

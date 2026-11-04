@@ -30,7 +30,8 @@ No app to install — it's just a website; add it to the home screen if you like
   plus bata by lunch/travel/material/other) against a provisional baseline, with a ₹ / per-worker-day
   toggle. Payments, cost by site, bata and past weeks are collapsible sections, and a **legend** explains
   every number. Advances / deductions / bonuses are editable from a list.
-- Owner home shows a read-only per-site headcount for the day with the marker's name.
+- Owner home shows today's **cost** (workers + bata, with lunch/travel/material/other), on-site / half /
+  absent counts, and **only the sites that were marked** for the day, with each worker and who marked them.
 - **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the **meter number**
   and **initial meter reading**, meter make, work date, remarks and two photos (meter, stove) — each
   photo can be taken with the camera or uploaded from the gallery — sees a done/pending progress bar,

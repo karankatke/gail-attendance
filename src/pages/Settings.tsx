@@ -63,6 +63,14 @@ export function MorePage() {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between px-1">
+        <p className="text-xs font-medium text-slate-400">App status</p>
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          Live
+        </span>
+      </div>
+
       <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-slate-100 p-1">
         {TABS.map((t) => (
           <button

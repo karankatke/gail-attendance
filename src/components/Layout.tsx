@@ -52,15 +52,9 @@ export function Layout({
   return (
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-20 bg-brand-700 px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] text-white shadow-sm">
-        <div className="mx-auto flex max-w-2xl items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold leading-tight">{title}</h1>
-            {subtitle ? <p className="text-xs text-brand-100">{subtitle}</p> : null}
-          </div>
-          <span className="flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-medium">
-            <span className="h-2 w-2 rounded-full bg-emerald-300" />
-            Live
-          </span>
+        <div className="mx-auto max-w-2xl text-center">
+          <h1 className="text-lg font-bold leading-tight">{title}</h1>
+          {subtitle ? <p className="text-xs text-brand-100">{subtitle}</p> : null}
         </div>
       </header>
 
