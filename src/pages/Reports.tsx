@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button, Card, Field, Modal, Spinner, inputClass } from "../components/ui";
+import { WorkerReportSheet } from "../components/WorkerReport";
 import { useTable } from "../hooks/useTable";
 import { requireClient } from "../lib/supabase";
 import { fetchDayAttendance, insertRow, removeRow, updateRow } from "../lib/db";
@@ -22,6 +23,7 @@ import type {
   LocationReportRow,
   ReportRow,
   Worker,
+  WorkLocation,
 } from "../lib/types";
 
 type Mode = "week" | "month";
@@ -55,8 +57,11 @@ export function ReportsPage() {
   const [todayLoading, setTodayLoading] = useState(false);
   const [todaySummary, setTodaySummary] = useState<TodaySummary | null>(null);
   const [todayError, setTodayError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [selectedWorker, setSelectedWorker] = useState<ReportRow | null>(null);
 
   const { rows: workers } = useTable<Worker>("workers", { orderColumn: "name" });
+  const { rows: locations } = useTable<WorkLocation>("locations", { orderColumn: "name" });
 
   const range = useMemo(
     () => (mode === "week" ? weekRange(anchor) : monthRange(anchor)),
@@ -170,18 +175,11 @@ export function ReportsPage() {
     [bataRows],
   );
 
-  const withActivity = useMemo(
-    () =>
-      rows.filter(
-        (r) =>
-          Number(r.gross_pay) > 0 ||
-          Number(r.advances) > 0 ||
-          Number(r.deductions) > 0 ||
-          Number(r.bonuses) > 0 ||
-          r.days_present + r.days_half + r.days_absent > 0,
-      ),
-    [rows],
-  );
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => r.worker_name.toLowerCase().includes(q));
+  }, [rows, query]);
 
   const step = (dir: number) => {
     if (mode === "week") setAnchor((a) => addDays(a, dir * 7));
@@ -244,57 +242,54 @@ export function ReportsPage() {
         <Stat label="Bata (misc)" value={formatINR(bataSpent)} tone="amber" />
       </div>
 
-      <div className="flex items-center justify-between px-1">
-        <p className="text-sm font-medium text-slate-500">Per worker</p>
+      <div className="flex items-center justify-between gap-2 px-1">
+        <p className="text-sm font-medium text-slate-500">Workers</p>
+        <span className="text-xs text-slate-400">{rows.length}</span>
       </div>
+
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search worker"
+        className={`${inputClass} py-2 text-sm`}
+      />
 
       {loading ? (
         <Spinner />
-      ) : withActivity.length === 0 ? (
+      ) : filteredRows.length === 0 ? (
         <Card className="p-6 text-center text-sm text-slate-500">
-          No attendance or payments in this {mode}.
+          {rows.length === 0 ? `No workers for this ${mode}.` : "No worker matches that name."}
         </Card>
       ) : (
-        <div className="space-y-2">
-          {withActivity.map((r) => (
-            <Card key={r.worker_id} className="p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate font-semibold text-slate-900">
-                    {r.worker_name}
-                    {r.rate_mode === "month" ? (
-                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">monthly</span>
-                    ) : null}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {r.role_name ?? "No role"} · {r.days_present}F/{r.days_half}H/{r.days_absent}A
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold text-slate-900">{formatINR(Number(r.net_pay))}</p>
-                  <p className="text-[11px] text-slate-400">gross {formatINR(Number(r.gross_pay))}</p>
-                </div>
-              </div>
-              {Number(r.advances) > 0 || Number(r.deductions) > 0 || Number(r.bonuses) > 0 ? (
-                <p className="mt-1 text-[11px] text-amber-700">
-                  {Number(r.advances) > 0 ? `advance ${formatINR(Number(r.advances))} ` : ""}
-                  {Number(r.deductions) > 0 ? `deduction ${formatINR(Number(r.deductions))} ` : ""}
-                  {Number(r.bonuses) > 0 ? `bonus ${formatINR(Number(r.bonuses))}` : ""}
+        <Card className="divide-y divide-slate-100">
+          {filteredRows.map((r) => (
+            <button
+              key={r.worker_id}
+              onClick={() => setSelectedWorker(r)}
+              className="flex w-full items-center justify-between gap-3 p-3 text-left active:bg-slate-50"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-slate-900">
+                  {r.worker_name}
+                  {r.rate_mode === "month" ? (
+                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">monthly</span>
+                  ) : null}
                 </p>
-              ) : null}
-              <div className="mt-2">
-                <Button variant="secondary" onClick={() => setAddingFor(r)} className="w-full py-2 text-xs">
-                  + Advance / deduction
-                </Button>
+                <p className="truncate text-xs text-slate-500">
+                  {r.role_name ?? "No role"} · {r.days_present}F · {r.days_half}H · {r.days_absent}A
+                </p>
               </div>
-            </Card>
+              <div className="shrink-0 text-right">
+                <p className="font-semibold text-slate-900">{formatINR(Number(r.net_pay))}</p>
+                <p className="text-[11px] text-slate-400">gross {formatINR(Number(r.gross_pay))}</p>
+              </div>
+            </button>
           ))}
-        </div>
+        </Card>
       )}
 
       {adjustments.length > 0 ? (
-        <div className="pt-2">
-          <p className="mb-2 px-1 text-sm font-medium text-slate-500">Payments in this {mode}</p>
+        <Section title="Payments" count={adjustments.length}>
           <div className="space-y-2">
             {adjustments.map((a) => (
               <Card key={a.id} className="p-3">
@@ -331,12 +326,11 @@ export function ReportsPage() {
               </Card>
             ))}
           </div>
-        </div>
+        </Section>
       ) : null}
 
       {locRows.length > 0 ? (
-        <div className="pt-2">
-          <p className="mb-2 px-1 text-sm font-medium text-slate-500">Cost by site</p>
+        <Section title="Cost by site" count={locRows.length}>
           <Card className="divide-y divide-slate-100">
             {locRows.map((l) => (
               <div key={l.location_id ?? "none"} className="flex items-center justify-between p-3">
@@ -348,13 +342,12 @@ export function ReportsPage() {
               </div>
             ))}
           </Card>
-        </div>
+        </Section>
       ) : null}
 
       {bataRows.length > 0 ? (
-        <div className="pt-2">
-          <div className="mb-2 flex items-center justify-between px-1">
-            <p className="text-sm font-medium text-slate-500">Bata (misc)</p>
+        <Section title="Bata (misc)" count={bataRows.length}>
+          <div className="mb-2 flex justify-end">
             <Button variant="ghost" onClick={() => setGrantOpen(true)}>
               + Give bata
             </Button>
@@ -374,12 +367,11 @@ export function ReportsPage() {
               </div>
             ))}
           </Card>
-        </div>
+        </Section>
       ) : null}
 
       {mode === "week" ? (
-        <div className="pt-2">
-          <p className="mb-2 px-1 text-sm font-medium text-slate-500">Weeks</p>
+        <Section title="Past weeks" count={recentWeeks.length}>
           <Card className="divide-y divide-slate-100">
             {recentWeeks.map((w) => (
               <button
@@ -392,7 +384,7 @@ export function ReportsPage() {
               </button>
             ))}
           </Card>
-        </div>
+        </Section>
       ) : null}
 
       {addingFor ? (
@@ -467,6 +459,47 @@ export function ReportsPage() {
           ) : null}
         </Modal>
       ) : null}
+      {selectedWorker ? (
+        <WorkerReportSheet
+          row={selectedWorker}
+          locationName={(id) => locations.find((l) => l.id === id)?.name ?? "No site"}
+          onClose={() => setSelectedWorker(null)}
+          onAddAdjustment={() => {
+            const r = selectedWorker;
+            setSelectedWorker(null);
+            if (r) setAddingFor(r);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function Section({
+  title,
+  count,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  count: number;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="pt-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-1 py-1 text-left"
+      >
+        <p className="text-sm font-medium text-slate-500">{title}</p>
+        <span className="flex items-center gap-1 text-xs text-slate-400">
+          {count}
+          <span>{open ? "▴" : "▾"}</span>
+        </span>
+      </button>
+      {open ? <div className="mt-2">{children}</div> : null}
     </div>
   );
 }

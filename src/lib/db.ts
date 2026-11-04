@@ -162,6 +162,31 @@ export async function fetchDayAttendance(date: string): Promise<DayAttendanceRow
   return (data ?? []) as DayAttendanceRow[];
 }
 
+export interface WorkerAttendanceDay {
+  work_date: string;
+  status: AttendanceStatus;
+  location_id: string | null;
+  note: string | null;
+}
+
+/** Attendance history for one worker (owner-only Reports view). */
+export async function fetchWorkerAttendance(
+  workerId: string,
+  from: string,
+  to: string,
+): Promise<WorkerAttendanceDay[]> {
+  const client = requireClient();
+  const { data, error } = await client
+    .from("attendance")
+    .select("work_date,status,location_id,note")
+    .eq("worker_id", workerId)
+    .gte("work_date", from)
+    .lte("work_date", to)
+    .order("work_date");
+  if (error) throw error;
+  return (data ?? []) as WorkerAttendanceDay[];
+}
+
 /** Supervisor adds a worker (name + role only; the owner sets the rate later). */
 export async function addWorker(name: string, roleId: string | null): Promise<void> {
   const client = requireClient();
@@ -265,12 +290,18 @@ export async function updateSiteFlat(
   },
 ): Promise<void> {
   const client = requireClient();
-  const { error } = await client.from("site_flats").update(input).eq("id", id);
+  const { data, error } = await client.from("site_flats").update(input).eq("id", id).select("id");
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error("The flat was not updated — the database blocked it. Ask the owner to apply the supervisor edit policy.");
+  }
 }
 
 export async function deleteSiteFlat(id: string): Promise<void> {
   const client = requireClient();
-  const { error } = await client.from("site_flats").delete().eq("id", id);
+  const { data, error } = await client.from("site_flats").delete().eq("id", id).select("id");
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error("The flat was not deleted — the database blocked it. Ask the owner to apply the supervisor delete policy.");
+  }
 }

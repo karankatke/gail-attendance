@@ -20,13 +20,16 @@ No app to install — it's just a website; add it to the home screen if you like
   material, other) and the owner sees it in reports as a separate "misc" line.
 - **Reports**: live current week, a week list with tap-to-view summaries, and a monthly view that
   includes monthly-salaried workers. A **Today's summary** popup shows today's total wages and the
-  headcount for each site. Advances / deductions / bonuses are editable from a list.
+  headcount for each site. Workers are a compact searchable list; tap one to open a bottom sheet with
+  a **week strip and month calendar** of attendance, wages for the selected range, and the last six
+  months at a glance. Payments, cost by site, bata and past weeks are collapsible sections.
+  Advances / deductions / bonuses are editable from a list.
 - Owner home shows a read-only per-site headcount for the day with the marker's name.
 - **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the **meter number**
   and **initial meter reading**, meter make, work date, remarks and two photos (meter, stove) — each
   photo can be taken with the camera or uploaded from the gallery — sees a done/pending progress bar,
   and can view or download PDFs. Flats a supervisor adds by hand can be **edited or deleted**, as long
-  as no meter record exists. The filled GAIL paper form is captured with a full-screen **document
+  as no meter record exists; the owner can do the same from the owner meter view. The filled GAIL paper form is captured with a full-screen **document
   scanner** (auto edge detection, optional corner correction, colour/grey/B&W cleanup) and is required
   before a flat is marked done. Two single-purpose PDFs are available: the **GAIL form** only, and the
   **meter photo + details** (no stove photo). The owner can **open a flat in-app** (photos + form +

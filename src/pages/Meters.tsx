@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Empty, Modal, Spinner } from "../components/ui";
 import { useTable } from "../hooks/useTable";
 import { flatSort, meterPhotoUrl } from "../lib/meters";
+import { FlatEditForm } from "../components/FlatEditForm";
 import { buildFormPdf, buildMeterPhotoPdf, buildSitePdf, pdfFileName, sharePdf } from "../lib/pdf";
 import type { MeterFlatRow, MeterRecord, SiteFlat, WorkLocation } from "../lib/types";
 
@@ -271,6 +272,7 @@ function MeterViewer({
   const [form, setForm] = useState<string | null>(null);
   const [busy, setBusy] = useState<"form" | "meter" | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -368,7 +370,25 @@ function MeterViewer({
             Not recorded yet — the supervisor hasn't added meter details for this flat.
           </p>
         )}
+
+        {row.flat.source === "manual" ? (
+          <Button variant="secondary" onClick={() => setEditOpen(true)} className="w-full text-xs">
+            Edit flat details
+          </Button>
+        ) : null}
       </div>
+
+      {editOpen ? (
+        <FlatEditForm
+          flat={row.flat}
+          hasRecord={!!rec}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => {
+            setEditOpen(false);
+            onClose();
+          }}
+        />
+      ) : null}
 
       {zoom ? (
         <div
