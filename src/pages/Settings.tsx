@@ -136,6 +136,20 @@ export function MorePage() {
           >
             <RolesSection roles={roles} loading={rolesLoading} onRefetch={refetchRoles} />
           </MoreSection>
+          <Card className="p-4">
+            <p className="text-sm font-semibold text-slate-900">Works &amp; SOR</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Rates, weekly work and RA bill for the GAIL contracts. Owner only.
+            </p>
+            <a
+              href="https://karankatke.github.io/gail-works/"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 block rounded-xl bg-brand-700 px-4 py-2.5 text-center text-sm font-semibold text-white active:bg-brand-800"
+            >
+              Open Works app
+            </a>
+          </Card>
           <AccountCard />
         </>
       ) : null}
