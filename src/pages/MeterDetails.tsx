@@ -6,9 +6,18 @@ import { useTable } from "../hooks/useTable";
 import { useAuth } from "../context/AuthContext";
 import { addSiteFlat, removeRow, saveMeterRecord } from "../lib/db";
 import { todayISO } from "../lib/dates";
-import { compressImage, flatSort, meterPhotoUrl, uploadMeterPhoto } from "../lib/meters";
-import { buildFormPdf, buildMeterPhotoPdf, pdfFileName, sharePdf } from "../lib/pdf";
-import type { MeterRecord, MeterFlatRow, SiteFlat, WorkLocation } from "../lib/types";
+import {
+  compressImage,
+  flatSort,
+  isRecordComplete,
+  meterPhotoUrl,
+  missingMeterFields,
+  shareMeterPhoto,
+  uploadMeterPhoto,
+} from "../lib/meters";
+import { buildFormPdf, pdfFileName, sharePdf } from "../lib/pdf";
+import { LengthInput } from "../components/LengthInput";
+import type { MeterRecord, MeterFlatRow, MeterSide, SiteFlat, WorkLocation } from "../lib/types";
 
 type Filter = "pending" | "done" | "all";
 
@@ -50,12 +59,23 @@ export function MeterDetailsPage() {
       .map((flat) => ({ flat, record: recordByFlat.get(flat.id) ?? null }));
   }, [flats, siteId, recordByFlat]);
 
-  const doneCount = rows.filter((r) => r.record?.status === "done").length;
+  const doneCount = rows.filter((r) => isRecordComplete(r.record)).length;
   const visible = rows.filter((r) => {
-    if (filter === "done") return r.record?.status === "done";
-    if (filter === "pending") return r.record?.status !== "done";
+    if (filter === "done") return isRecordComplete(r.record);
+    if (filter === "pending") return !isRecordComplete(r.record);
     return true;
   });
+
+  const pendingBySite = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const f of flats) {
+      if (!f.active) continue;
+      if (!isRecordComplete(recordByFlat.get(f.id) ?? null)) {
+        m.set(f.location_id, (m.get(f.location_id) ?? 0) + 1);
+      }
+    }
+    return m;
+  }, [flats, recordByFlat]);
 
   if (flatsLoading || recLoading) return <Spinner />;
 
@@ -64,11 +84,15 @@ export function MeterDetailsPage() {
       <Card className="space-y-3 p-3">
         <Field label="Site">
           <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className={inputClass}>
-            {locations.filter((l) => l.active).map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
+            {locations.filter((l) => l.active).map((l) => {
+              const pending = pendingBySite.get(l.id) ?? 0;
+              return (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                  {pending ? ` (${pending} pending)` : ""}
+                </option>
+              );
+            })}
           </select>
         </Field>
         <div>
@@ -84,6 +108,12 @@ export function MeterDetailsPage() {
               style={{ width: rows.length ? `${(doneCount / rows.length) * 100}%` : "0%" }}
             />
           </div>
+          {rows.length - doneCount > 0 ? (
+            <p className="mt-1 text-[11px] text-slate-400">
+              {rows.length - doneCount} flat{rows.length - doneCount === 1 ? "" : "s"} with missing
+              details
+            </p>
+          ) : null}
         </div>
       </Card>
 
@@ -173,7 +203,8 @@ function FlatRow({
   onOpen: () => void;
   onEdit: () => void;
 }) {
-  const done = row.record?.status === "done";
+  const done = isRecordComplete(row.record);
+  const missing = missingMeterFields(row.record);
   return (
     <Card className="p-3">
       <div className="flex items-center justify-between gap-3">
@@ -188,6 +219,23 @@ function FlatRow({
             BP {row.flat.bp_number ?? "-"}
             {row.flat.application_no ? ` · App ${row.flat.application_no}` : ""}
           </p>
+          {!done && missing.length > 0 ? (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {missing.slice(0, 3).map((m) => (
+                <span
+                  key={m}
+                  className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                >
+                  {m}
+                </span>
+              ))}
+              {missing.length > 3 ? (
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                  +{missing.length - 3} more
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </button>
         <div className="flex shrink-0 items-center gap-1">
           {row.flat.source === "manual" ? (
@@ -326,6 +374,9 @@ function FlatForm({
     record?.initial_meter_reading != null ? String(record.initial_meter_reading) : "",
   );
   const [make, setMake] = useState(record?.meter_make ?? "");
+  const [side, setSide] = useState<MeterSide | null>(record?.meter_side ?? null);
+  const [giPipe, setGiPipe] = useState<number | null>(record?.gi_pipe_length_m ?? null);
+  const [mlcPipe, setMlcPipe] = useState<number | null>(record?.mlc_pipe_length_m ?? null);
   const [workDate, setWorkDate] = useState(record?.work_date ?? todayISO());
   const [remarks, setRemarks] = useState(record?.remarks ?? "");
   const [meter, setMeter] = useState<{ blob: Blob; url: string } | null>(null);
@@ -362,30 +413,35 @@ function FlatForm({
   const hasForm = !!formScan || (!!remoteForm && !!record?.form_photo_path);
 
   const save = async () => {
-    const readingNum = Number(reading);
-    if (reading.trim() === "" || !Number.isFinite(readingNum)) {
-      setError("Enter the meter number.");
+    const readingText = reading.trim();
+    const initialText = initialReading.trim();
+    const readingNum = readingText === "" ? null : Number(readingText);
+    const initialNum = initialText === "" ? null : Number(initialText);
+    if (readingText !== "" && !Number.isFinite(readingNum)) {
+      setError("Meter number must be a number.");
       return;
     }
-    const initialNum = Number(initialReading);
-    if (initialReading.trim() === "" || !Number.isFinite(initialNum)) {
-      setError("Enter the initial meter reading (numbers only).");
+    if (initialText !== "" && !Number.isFinite(initialNum)) {
+      setError("Initial meter reading must be a number.");
       return;
     }
-    if (!make.trim()) {
-      setError("Enter the meter make.");
+    if (giPipe === 0 || mlcPipe === 0) {
+      setError("GI and MLC piping must be more than 0, or left blank until measured.");
       return;
     }
-    if (!hasMeter) {
-      setError("Add the meter photo.");
-      return;
-    }
-    if (!hasValve) {
-      setError("Add the stove photo.");
-      return;
-    }
-    if (!hasForm) {
-      setError("Scan the filled GAIL form.");
+    const hasAny =
+      readingNum != null ||
+      initialNum != null ||
+      make.trim() !== "" ||
+      side != null ||
+      giPipe != null ||
+      mlcPipe != null ||
+      hasMeter ||
+      hasValve ||
+      hasForm ||
+      !!record;
+    if (!hasAny) {
+      setError("Add at least one detail before saving.");
       return;
     }
     setBusy(true);
@@ -393,25 +449,42 @@ function FlatForm({
     try {
       const meterPath = meter
         ? await uploadMeterPhoto(flat.location_id, flat.id, "meter", meter.blob)
-        : record!.meter_photo_path!;
+        : record?.meter_photo_path ?? null;
       const valvePath = valve
         ? await uploadMeterPhoto(flat.location_id, flat.id, "valve", valve.blob)
-        : record!.valve_photo_path!;
+        : record?.valve_photo_path ?? null;
       const formPath = formScan
         ? await uploadMeterPhoto(flat.location_id, flat.id, "form", formScan.blob)
-        : record!.form_photo_path!;
+        : record?.form_photo_path ?? null;
+
+      const complete =
+        readingNum != null &&
+        initialNum != null &&
+        make.trim() !== "" &&
+        side != null &&
+        giPipe != null &&
+        giPipe > 0 &&
+        mlcPipe != null &&
+        mlcPipe > 0 &&
+        !!meterPath &&
+        !!valvePath &&
+        !!formPath;
+
       const row = await saveMeterRecord({
         site_flat_id: flat.id,
         location_id: flat.location_id,
         meter_reading: readingNum,
         initial_meter_reading: initialNum,
-        meter_make: make.trim(),
+        meter_make: make.trim() || null,
+        meter_side: side,
+        gi_pipe_length_m: giPipe,
+        mlc_pipe_length_m: mlcPipe,
         work_date: workDate,
         remarks: remarks.trim() || null,
         meter_photo_path: meterPath,
         valve_photo_path: valvePath,
         form_photo_path: formPath,
-        status: "done",
+        status: complete ? "done" : "draft",
         created_by_profile_id: profileId,
       });
       if (row) {
@@ -426,21 +499,33 @@ function FlatForm({
     }
   };
 
-  const downloadPdf = async (kind: "form" | "meter") => {
+  const downloadForm = async () => {
     const rec = saved ?? record;
     if (!rec) return;
-    setPdfBusy(kind);
+    setPdfBusy("form");
     setError(null);
     try {
-      const doc =
-        kind === "form"
-          ? await buildFormPdf(siteName, flat, rec)
-          : await buildMeterPhotoPdf(siteName, flat, rec);
-      const name = pdfFileName(siteName, flat.flat_number, kind);
-      const res = await sharePdf(doc, name);
-      if (res === "downloaded") setError("PDF saved to your device.");
+      const doc = await buildFormPdf(siteName, flat, rec);
+      await sharePdf(doc, pdfFileName(siteName, flat.flat_number, "form"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not build the PDF");
+    } finally {
+      setPdfBusy(null);
+    }
+  };
+
+  const downloadMeterImage = async (path: string) => {
+    setPdfBusy("meter");
+    setError(null);
+    try {
+      const slug = siteName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
+      const res = await shareMeterPhoto(
+        path,
+        `${slug}-${flat.flat_number}-meter-${todayISO()}`,
+      );
+      if (res === "downloaded") setError("Meter photo saved to your device.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not download the meter photo");
     } finally {
       setPdfBusy(null);
     }
@@ -459,29 +544,58 @@ function FlatForm({
   };
 
   if (saved) {
+    const savedComplete = isRecordComplete(saved);
+    const savedMissing = missingMeterFields(saved);
     return (
       <Modal title={`Flat ${flat.flat_number}`} onClose={onSaved}>
         <div className="space-y-4">
-          <div className="rounded-xl bg-emerald-50 p-4 text-center">
-            <p className="text-sm font-semibold text-emerald-800">Meter details saved</p>
-            <p className="mt-0.5 text-xs text-emerald-700">Download the PDFs you need, then close.</p>
+          <div
+            className={`rounded-xl p-4 text-center ${
+              savedComplete ? "bg-emerald-50" : "bg-amber-50"
+            }`}
+          >
+            <p
+              className={`text-sm font-semibold ${
+                savedComplete ? "text-emerald-800" : "text-amber-800"
+              }`}
+            >
+              {savedComplete ? "Meter details complete" : "Saved — some details are pending"}
+            </p>
+            <p
+              className={`mt-0.5 text-xs ${
+                savedComplete ? "text-emerald-700" : "text-amber-700"
+              }`}
+            >
+              {savedComplete
+                ? "Download the meter photo or GAIL form if needed."
+                : `Still needed: ${savedMissing.join(", ")}`}
+            </p>
           </div>
-          <Button
-            variant="secondary"
-            onClick={() => downloadPdf("form")}
-            disabled={!!pdfBusy || !saved.form_photo_path}
-            className="w-full"
-          >
-            {pdfBusy === "form" ? "Building…" : "Download GAIL form PDF"}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => downloadPdf("meter")}
-            disabled={!!pdfBusy || !saved.meter_photo_path}
-            className="w-full"
-          >
-            {pdfBusy === "meter" ? "Building…" : "Download meter photo PDF"}
-          </Button>
+          {!savedComplete ? (
+            <Button variant="secondary" onClick={() => setSaved(null)} className="w-full">
+              Add the missing details
+            </Button>
+          ) : null}
+          {saved.meter_photo_path ? (
+            <Button
+              variant="secondary"
+              onClick={() => saved.meter_photo_path && downloadMeterImage(saved.meter_photo_path)}
+              disabled={!!pdfBusy}
+              className="w-full"
+            >
+              {pdfBusy === "meter" ? "Preparing…" : "Download meter photo (image)"}
+            </Button>
+          ) : null}
+          {saved.form_photo_path ? (
+            <Button
+              variant="secondary"
+              onClick={downloadForm}
+              disabled={!!pdfBusy}
+              className="w-full"
+            >
+              {pdfBusy === "form" ? "Building…" : "Download GAIL form PDF"}
+            </Button>
+          ) : null}
           {error ? <p className="text-sm text-slate-600">{error}</p> : null}
           <Button onClick={onSaved} className="w-full">
             Done
@@ -490,6 +604,18 @@ function FlatForm({
       </Modal>
     );
   }
+
+  const draftMissing = missingMeterFields({
+    meter_reading: reading.trim() === "" ? null : Number(reading),
+    initial_meter_reading: initialReading.trim() === "" ? null : Number(initialReading),
+    meter_make: make.trim() || null,
+    meter_side: side,
+    gi_pipe_length_m: giPipe,
+    mlc_pipe_length_m: mlcPipe,
+    meter_photo_path: hasMeter ? "set" : null,
+    valve_photo_path: hasValve ? "set" : null,
+    form_photo_path: hasForm ? "set" : null,
+  });
 
   return (
     <Modal title={`Flat ${flat.flat_number}`} onClose={onClose}>
@@ -500,6 +626,17 @@ function FlatForm({
           <Row label="Application no." value={flat.application_no ?? "—"} />
           <Row label="Tower / floor" value={`${flat.tower ?? "—"} · ${flat.floor ?? "—"}`} />
         </div>
+
+        {draftMissing.length > 0 ? (
+          <div className="rounded-xl bg-amber-50 p-2.5">
+            <p className="text-[11px] font-semibold text-amber-800">Still needed to complete</p>
+            <p className="text-[11px] text-amber-700">{draftMissing.join(" · ")}</p>
+          </div>
+        ) : (
+          <p className="rounded-xl bg-emerald-50 p-2.5 text-[11px] font-semibold text-emerald-700">
+            All details complete
+          </p>
+        )}
 
         <Field label="Meter number">
           <input
@@ -522,11 +659,45 @@ function FlatForm({
         <Field label="Meter make">
           <input value={make} onChange={(e) => setMake(e.target.value)} className={inputClass} placeholder="e.g. Itron / Elster" />
         </Field>
+        <Field label="Meter side">
+          <div className="grid grid-cols-2 gap-2">
+            {(["LHS", "RHS"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSide(s)}
+                className={`rounded-xl border px-3 py-2.5 text-sm font-semibold ${
+                  side === s
+                    ? "border-brand-600 bg-brand-50 text-brand-700"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </Field>
         <Field label="Work date">
           <input type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} className={inputClass} />
         </Field>
 
-        <PhotoField label="Meter photo" preview={meter?.url ?? remoteMeter} onChange={setMeter} />
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Total piping for this flat
+          </p>
+          <p className="-mt-1 text-[11px] text-slate-400">
+            Enter in feet/inches or metres. It is stored in metres.
+          </p>
+          <LengthInput label="GI piping" value={giPipe} onChange={setGiPipe} />
+          <LengthInput label="MLC piping" value={mlcPipe} onChange={setMlcPipe} />
+        </div>
+
+        <div>
+          <PhotoField label="Meter photo" preview={meter?.url ?? remoteMeter} onChange={setMeter} />
+          <p className="mt-1 text-[11px] text-slate-400">
+            Make sure the meter number and meter make are clearly visible.
+          </p>
+        </div>
         <PhotoField label="Stove photo (on)" preview={valve?.url ?? remoteValve} onChange={setValve} />
 
         <div className="rounded-xl border border-slate-200 p-3">
@@ -589,19 +760,21 @@ function FlatForm({
             <div className="flex gap-2">
               <Button
                 variant="secondary"
-                onClick={() => downloadPdf("form")}
-                disabled={!!pdfBusy}
+                onClick={downloadForm}
+                disabled={!!pdfBusy || !record.form_photo_path}
                 className="flex-1 text-xs"
               >
                 {pdfBusy === "form" ? "Building…" : "GAIL form PDF"}
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => downloadPdf("meter")}
-                disabled={!!pdfBusy}
+                onClick={() =>
+                  record.meter_photo_path && downloadMeterImage(record.meter_photo_path)
+                }
+                disabled={!!pdfBusy || !record.meter_photo_path}
                 className="flex-1 text-xs"
               >
-                {pdfBusy === "meter" ? "Building…" : "Meter photo PDF"}
+                {pdfBusy === "meter" ? "Preparing…" : "Meter photo (image)"}
               </Button>
             </div>
             <Button variant="danger" onClick={del} disabled={busy} className="w-full">

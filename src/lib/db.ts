@@ -5,6 +5,7 @@ import type {
   DayAttendanceRow,
   LoginEntry,
   MeterRecord,
+  MeterSide,
   MeterStatus,
   Profile,
   PublicRole,
@@ -239,11 +240,14 @@ export async function saveMeterRecord(input: {
   meter_reading: number | null;
   initial_meter_reading: number | null;
   meter_make: string | null;
+  meter_side: MeterSide | null;
+  gi_pipe_length_m: number | null;
+  mlc_pipe_length_m: number | null;
   work_date: string;
   remarks: string | null;
-  meter_photo_path: string;
-  valve_photo_path: string;
-  form_photo_path: string;
+  meter_photo_path: string | null;
+  valve_photo_path: string | null;
+  form_photo_path: string | null;
   status: MeterStatus;
   created_by_profile_id: string | null;
 }): Promise<MeterRecord | null> {

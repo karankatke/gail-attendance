@@ -102,15 +102,71 @@ export async function meterPhotoUrl(path: string | null, expiresIn = 3600): Prom
 
 /** True when every field GAIL needs is present. */
 export function isRecordComplete(rec: MeterRecord | null): boolean {
-  return (
-    !!rec &&
-    rec.meter_reading != null &&
-    rec.initial_meter_reading != null &&
-    !!rec.meter_make?.trim() &&
-    !!rec.meter_photo_path &&
-    !!rec.valve_photo_path &&
-    !!rec.form_photo_path
-  );
+  return missingMeterFields(rec).length === 0;
+}
+
+/** Human labels for whatever is still missing on a full or partial record. */
+export function missingMeterFields(rec: Partial<MeterRecord> | null): string[] {
+  if (!rec) return ["Not started"];
+  const out: string[] = [];
+  if (rec.meter_reading == null) out.push("Meter number");
+  if (rec.initial_meter_reading == null) out.push("Initial reading");
+  if (!rec.meter_make?.trim()) out.push("Meter make");
+  if (!rec.meter_side) out.push("LHS/RHS");
+  if (rec.gi_pipe_length_m == null || rec.gi_pipe_length_m <= 0) out.push("GI piping");
+  if (rec.mlc_pipe_length_m == null || rec.mlc_pipe_length_m <= 0) out.push("MLC piping");
+  if (!rec.meter_photo_path) out.push("Meter photo");
+  if (!rec.valve_photo_path) out.push("Stove photo");
+  if (!rec.form_photo_path) out.push("GAIL form");
+  return out;
+}
+
+export function formatMeters(m: number | null): string {
+  if (m == null) return "—";
+  return `${m.toFixed(2)} m`;
+}
+
+/** Download or share the original meter photo as an image (not a PDF). */
+export async function shareMeterPhoto(
+  path: string | null,
+  baseName: string,
+): Promise<"shared" | "downloaded"> {
+  if (!path) throw new Error("No meter photo");
+  const url = await meterPhotoUrl(path);
+  if (!url) throw new Error("Could not load the meter photo.");
+  let blob: Blob;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Could not load the meter photo.");
+    blob = await res.blob();
+  } catch {
+    // If fetch is blocked, open the image so it can still be saved/shared.
+    window.open(url, "_blank");
+    return "downloaded";
+  }
+  const type = blob.type || "image/jpeg";
+  const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : "jpg";
+  const file = new File([blob], `${baseName}.${ext}`, { type });
+  const nav = navigator as Navigator & {
+    canShare?: (data: { files: File[] }) => boolean;
+    share?: (data: { files: File[]; title?: string }) => Promise<void>;
+  };
+  if (nav.share && nav.canShare?.({ files: [file] })) {
+    try {
+      await nav.share({ files: [file], title: file.name });
+      return "shared";
+    } catch {
+      // fall through to download
+    }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = file.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return "downloaded";
 }
 
 export function flatSort(a: SiteFlat, b: SiteFlat): number {

@@ -180,6 +180,7 @@ export interface BataReportRow {
 }
 
 export type MeterStatus = "draft" | "done";
+export type MeterSide = "LHS" | "RHS";
 export type MeterPhotoKind = "meter" | "valve" | "form";
 
 export interface SiteFlat {
@@ -209,6 +210,9 @@ export interface MeterRecord {
   meter_reading: number | null;
   initial_meter_reading: number | null;
   meter_make: string | null;
+  meter_side: MeterSide | null;
+  gi_pipe_length_m: number | null;
+  mlc_pipe_length_m: number | null;
   work_date: string;
   remarks: string | null;
   meter_photo_path: string | null;

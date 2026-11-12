@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Empty, Modal, Spinner } from "../components/ui";
 import { useTable } from "../hooks/useTable";
-import { flatSort, meterPhotoUrl } from "../lib/meters";
+import { flatSort, formatMeters, isRecordComplete, meterPhotoUrl, missingMeterFields, shareMeterPhoto } from "../lib/meters";
 import { FlatEditForm } from "../components/FlatEditForm";
-import { buildFormPdf, buildMeterPhotoPdf, buildSitePdf, pdfFileName, sharePdf } from "../lib/pdf";
+import { buildFormPdf, buildSitePdf, pdfFileName, sharePdf } from "../lib/pdf";
 import type { MeterFlatRow, MeterRecord, SiteFlat, WorkLocation } from "../lib/types";
 
 export function MetersPage() {
@@ -63,7 +63,7 @@ export function MetersPage() {
       {siteIds.map((id) => {
         const name = locations.find((l) => l.id === id)?.name ?? "Site";
         const siteFlats = flatsBySite.get(id) ?? [];
-        const done = siteFlats.filter((f) => recordByFlat.get(f.id)?.status === "done").length;
+        const done = siteFlats.filter((f) => isRecordComplete(recordByFlat.get(f.id) ?? null)).length;
         const pct = siteFlats.length ? (done / siteFlats.length) * 100 : 0;
         return (
           <Card key={id} className="p-3">
@@ -98,10 +98,14 @@ function SiteMeters({
   onBack: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [towerBusy, setTowerBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const doneRows = rows.filter((r) => r.record?.status === "done") as { flat: SiteFlat; record: MeterRecord }[];
+  const doneRows = rows.filter((r) => isRecordComplete(r.record)) as {
+    flat: SiteFlat;
+    record: MeterRecord;
+  }[];
 
   const combined = async () => {
     if (doneRows.length === 0) return;
@@ -116,6 +120,24 @@ function SiteMeters({
     } finally {
       setBusy(false);
       setProgress(null);
+    }
+  };
+
+  const towerPdf = async (tower: string, list: MeterFlatRow[]) => {
+    const complete = list.filter((r) => isRecordComplete(r.record)) as {
+      flat: SiteFlat;
+      record: MeterRecord;
+    }[];
+    if (list.length === 0 || complete.length !== list.length) return;
+    setTowerBusy(tower);
+    setError(null);
+    try {
+      const doc = await buildSitePdf(`${siteName} · Tower ${tower}`, complete);
+      await sharePdf(doc, pdfFileName(`${siteName} Tower ${tower}`));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not build the tower PDF");
+    } finally {
+      setTowerBusy(null);
     }
   };
 
@@ -148,8 +170,11 @@ function SiteMeters({
             ? progress
               ? `Building… ${progress.done}/${progress.total}`
               : "Building…"
-            : `Download combined PDF (${doneRows.length})`}
+            : `Download site PDF (${doneRows.length} complete)`}
         </Button>
+        <p className="text-[11px] text-slate-400">
+          A tower PDF unlocks when every flat in that tower is complete.
+        </p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
       </Card>
 
@@ -157,16 +182,42 @@ function SiteMeters({
         <Empty title="No flats" hint="This site has no flat list yet." />
       ) : (
         <div className="space-y-4">
-          {groups.map(([tower, list]) => (
-            <div key={tower}>
-              <p className="mb-1.5 px-1 text-sm font-medium text-slate-500">Tower {tower}</p>
-              <div className="space-y-2">
-                {list.map((r) => (
-                  <OwnerRow key={r.flat.id} row={r} siteName={siteName} />
-                ))}
+          {groups.map(([tower, list]) => {
+            const completeCount = list.filter((r) => isRecordComplete(r.record)).length;
+            const allComplete = list.length > 0 && completeCount === list.length;
+            return (
+              <div key={tower}>
+                <div className="mb-1.5 flex items-center justify-between gap-2 px-1">
+                  <p className="text-sm font-medium text-slate-500">Tower {tower}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      {completeCount}/{list.length}
+                    </span>
+                    <button
+                      onClick={() => towerPdf(tower, list)}
+                      disabled={!allComplete || towerBusy === tower}
+                      className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
+                        allComplete
+                          ? "bg-brand-50 text-brand-700 active:bg-brand-100"
+                          : "bg-slate-100 text-slate-400"
+                      } disabled:opacity-60`}
+                    >
+                      {towerBusy === tower
+                        ? "Building…"
+                        : allComplete
+                          ? "Download PDF"
+                          : `${list.length - completeCount} pending`}
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {list.map((r) => (
+                    <OwnerRow key={r.flat.id} row={r} siteName={siteName} />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -177,7 +228,8 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
   const [thumb, setThumb] = useState<string | null>(null);
   const [busy, setBusy] = useState<"form" | "meter" | null>(null);
   const [open, setOpen] = useState(false);
-  const done = row.record?.status === "done";
+  const done = isRecordComplete(row.record);
+  const missing = missingMeterFields(row.record);
 
   useEffect(() => {
     let cancelled = false;
@@ -193,11 +245,22 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
     if (!row.record) return;
     setBusy(kind);
     try {
-      const doc =
-        kind === "form"
-          ? await buildFormPdf(siteName, row.flat, row.record)
-          : await buildMeterPhotoPdf(siteName, row.flat, row.record);
-      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, kind));
+      const doc = await buildFormPdf(siteName, row.flat, row.record);
+      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, "form"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const meterImage = async () => {
+    if (!row.record?.meter_photo_path) return;
+    setBusy("meter");
+    try {
+      const slug = siteName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
+      await shareMeterPhoto(
+        row.record.meter_photo_path,
+        `${slug}-${row.flat.flat_number}-meter`,
+      );
     } finally {
       setBusy(null);
     }
@@ -218,9 +281,26 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
           </p>
           <p className="truncate text-xs text-slate-500">
             {done && row.record
-              ? `Meter no. ${row.record.meter_reading ?? "—"} · ${row.record.meter_make ?? "—"}`
+              ? `Meter no. ${row.record.meter_reading ?? "—"} · ${row.record.meter_make ?? "—"} · ${row.record.meter_side ?? "—"}`
               : `BP ${row.flat.bp_number ?? "—"} · pending`}
           </p>
+          {!done && missing.length > 0 ? (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {missing.slice(0, 2).map((m) => (
+                <span
+                  key={m}
+                  className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                >
+                  {m}
+                </span>
+              ))}
+              {missing.length > 2 ? (
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                  +{missing.length - 2}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </button>
       {done ? (
@@ -239,11 +319,11 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
             {busy === "form" ? "…" : "Form"}
           </button>
           <button
-            onClick={() => pdf("meter")}
+            onClick={meterImage}
             disabled={!!busy || !row.record?.meter_photo_path}
             className="rounded-lg bg-slate-100 px-2 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
           >
-            {busy === "meter" ? "…" : "Meter"}
+            {busy === "meter" ? "…" : "Photo"}
           </button>
         </div>
       ) : (
@@ -295,8 +375,19 @@ function MeterViewer({
     if (!rec) return;
     setBusy(kind);
     try {
-      const doc = kind === "form" ? await buildFormPdf(siteName, row.flat, rec) : await buildMeterPhotoPdf(siteName, row.flat, rec);
-      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, kind));
+      const doc = await buildFormPdf(siteName, row.flat, rec);
+      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, "form"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const meterImage = async () => {
+    if (!rec?.meter_photo_path) return;
+    setBusy("meter");
+    try {
+      const slug = siteName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
+      await shareMeterPhoto(rec.meter_photo_path, `${slug}-${row.flat.flat_number}-meter`);
     } finally {
       setBusy(null);
     }
@@ -322,9 +413,18 @@ function MeterViewer({
                 value={rec.initial_meter_reading != null ? String(rec.initial_meter_reading) : "—"}
               />
               <InfoRow label="Meter make" value={rec.meter_make ?? "—"} />
+              <InfoRow label="Meter side" value={rec.meter_side ?? "—"} />
+              <InfoRow label="GI piping" value={formatMeters(rec.gi_pipe_length_m)} />
+              <InfoRow label="MLC piping" value={formatMeters(rec.mlc_pipe_length_m)} />
               <InfoRow label="Work date" value={rec.work_date} />
               {rec.remarks ? <InfoRow label="Remarks" value={rec.remarks} /> : null}
             </div>
+
+            {!isRecordComplete(rec) ? (
+              <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+                Missing: {missingMeterFields(rec).join(", ")}
+              </p>
+            ) : null}
 
             <div className="grid grid-cols-2 gap-2">
               <PhotoTile label="Meter photo" url={meter} onZoom={setZoom} />
@@ -357,11 +457,11 @@ function MeterViewer({
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => pdf("meter")}
+                onClick={meterImage}
                 disabled={!!busy || !rec.meter_photo_path}
                 className="flex-1 text-xs"
               >
-                {busy === "meter" ? "Building…" : "Meter photo PDF"}
+                {busy === "meter" ? "Preparing…" : "Meter photo (image)"}
               </Button>
             </div>
           </>
