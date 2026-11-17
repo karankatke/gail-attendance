@@ -32,16 +32,21 @@ No app to install — it's just a website; add it to the home screen if you like
   every number. Advances / deductions / bonuses are editable from a list.
 - Owner home shows today's **cost** (workers + bata, with lunch/travel/material/other), on-site / half /
   absent counts, and **only the sites that were marked** for the day, with each worker and who marked them.
+  Bata is also **split by supervisor**, so you can see how much site cash each one spent.
 - **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the **meter number**
   and **initial meter reading**, meter make, work date, remarks and two photos (meter, stove) — each
   photo can be taken with the camera or uploaded from the gallery — sees a done/pending progress bar,
   and can view or download PDFs. Flats a supervisor adds by hand can be **edited or deleted**, as long
-  as no meter record exists; the owner can do the same from the owner meter view. The filled GAIL paper form is captured with a full-screen **document
-  scanner** (auto edge detection, optional corner correction, colour/grey/B&W cleanup) and is required
-  before a flat is marked done. Two single-purpose PDFs are available: the **GAIL form** only, and the
-  **meter photo + details** (no stove photo). The owner can **open a flat in-app** (photos + form +
-  details) or download a **combined PDF** of all recorded flats for a site. Photos are downscaled on the
-  phone before upload.
+  as no meter record exists; the owner can do the same from the owner meter view. The owner can also
+  **edit or complete any meter record**, including a missing meter number or form scan. The filled GAIL
+  paper form is captured with a full-screen **document scanner** (auto edge detection, optional corner
+  correction, colour/grey/B&W cleanup) and is required before a flat is marked done.
+  - **For GAIL upload** — two separate per-flat PDFs, available as soon as the photo exists:
+    the **meter photo PDF** (meter photo plus GI, MLC and **total piping = GI + MLC**) and the
+    **GAIL form PDF** (scanned form).
+  - **Internal record** — the owner-only **full site PDF** (every detail and photo, one flat per page)
+    and **tower PDFs**, which unlock only when every flat in that tower is complete.
+  Photos are downscaled on the phone before upload.
 - Live sync across all phones via Supabase Realtime.
 
 Stack: React + Vite + TypeScript + Tailwind, Supabase (Postgres + Auth + RLS + Realtime + Edge Functions),

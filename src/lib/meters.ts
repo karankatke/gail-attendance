@@ -126,6 +126,22 @@ export function formatMeters(m: number | null): string {
   return `${m.toFixed(2)} m`;
 }
 
+/** GI + MLC total piping in metres, or null while either is missing. */
+export function totalPiping(rec: Partial<MeterRecord> | null): number | null {
+  if (!rec || rec.gi_pipe_length_m == null || rec.mlc_pipe_length_m == null) return null;
+  return rec.gi_pipe_length_m + rec.mlc_pipe_length_m;
+}
+
+/** One-line piping summary for owners: GI + MLC = total. */
+export function formatPiping(rec: Partial<MeterRecord> | null): string {
+  if (!rec || rec.gi_pipe_length_m == null || rec.mlc_pipe_length_m == null) {
+    return "Piping pending";
+  }
+  return `${rec.gi_pipe_length_m.toFixed(2)} m GI + ${rec.mlc_pipe_length_m.toFixed(
+    2,
+  )} m MLC = ${(rec.gi_pipe_length_m + rec.mlc_pipe_length_m).toFixed(2)} m`;
+}
+
 /** Download or share the original meter photo as an image (not a PDF). */
 export async function shareMeterPhoto(
   path: string | null,

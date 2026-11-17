@@ -1,10 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Empty, Modal, Spinner } from "../components/ui";
 import { useTable } from "../hooks/useTable";
-import { flatSort, formatMeters, isRecordComplete, meterPhotoUrl, missingMeterFields, shareMeterPhoto } from "../lib/meters";
+import { useAuth } from "../context/AuthContext";
 import { FlatEditForm } from "../components/FlatEditForm";
-import { buildFormPdf, buildSitePdf, pdfFileName, sharePdf } from "../lib/pdf";
+import { MeterRecordForm } from "../components/MeterRecordForm";
+import {
+  flatSort,
+  formatMeters,
+  formatPiping,
+  isRecordComplete,
+  meterPhotoUrl,
+  missingMeterFields,
+  shareMeterPhoto,
+  totalPiping,
+} from "../lib/meters";
+import {
+  buildFormPdf,
+  buildMeterPhotoPdf,
+  buildSitePdf,
+  pdfFileName,
+  sharePdf,
+} from "../lib/pdf";
 import type { MeterFlatRow, MeterRecord, SiteFlat, WorkLocation } from "../lib/types";
+
+const actionPrimary =
+  "rounded-lg bg-brand-50 px-2.5 py-1.5 text-[11px] font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40";
+const actionSecondary =
+  "rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40";
+const actionGhost =
+  "rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 active:bg-slate-100 disabled:opacity-40";
 
 export function MetersPage() {
   const { rows: locations } = useTable<WorkLocation>("locations", { orderColumn: "name" });
@@ -97,10 +121,12 @@ function SiteMeters({
   rows: MeterFlatRow[];
   onBack: () => void;
 }) {
+  const { profile } = useAuth();
   const [busy, setBusy] = useState(false);
   const [towerBusy, setTowerBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<MeterFlatRow | null>(null);
 
   const doneRows = rows.filter((r) => isRecordComplete(r.record)) as {
     flat: SiteFlat;
@@ -158,22 +184,39 @@ function SiteMeters({
         ← All sites
       </button>
 
-      <Card className="space-y-3 p-3">
-        <div className="flex items-center justify-between">
-          <p className="font-semibold text-slate-900">{siteName}</p>
-          <span className="text-sm font-semibold text-slate-500">
-            {doneRows.length} / {rows.length} done
+      <Card className="space-y-2 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-700">
+              For GAIL upload
+            </p>
+            <p className="font-semibold text-slate-900">{siteName}</p>
+          </div>
+          <span className="shrink-0 text-sm font-semibold text-slate-500">
+            {doneRows.length} / {rows.length} complete
           </span>
         </div>
+        <p className="text-[11px] text-slate-500">
+          Each flat has its own <b>meter photo PDF</b> (with GI + MLC = total piping) and{" "}
+          <b>GAIL form PDF</b>. They are available as soon as the photo exists — no need to wait
+          for the tower.
+        </p>
+      </Card>
+
+      <Card className="space-y-2 p-3">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+          Internal record
+        </p>
         <Button onClick={combined} disabled={busy || doneRows.length === 0} className="w-full">
           {busy
             ? progress
               ? `Building… ${progress.done}/${progress.total}`
               : "Building…"
-            : `Download site PDF (${doneRows.length} complete)`}
+            : `Download full site PDF (${doneRows.length} complete)`}
         </Button>
         <p className="text-[11px] text-slate-400">
-          A tower PDF unlocks when every flat in that tower is complete.
+          All details, photos and form scans, one flat per page. Tower PDFs unlock when every flat
+          in that tower is complete.
         </p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
       </Card>
@@ -205,14 +248,19 @@ function SiteMeters({
                       {towerBusy === tower
                         ? "Building…"
                         : allComplete
-                          ? "Download PDF"
+                          ? "Tower PDF"
                           : `${list.length - completeCount} pending`}
                     </button>
                   </div>
                 </div>
                 <div className="space-y-2">
                   {list.map((r) => (
-                    <OwnerRow key={r.flat.id} row={r} siteName={siteName} />
+                    <OwnerRow
+                      key={r.flat.id}
+                      row={r}
+                      siteName={siteName}
+                      onEdit={() => setEditing(r)}
+                    />
                   ))}
                 </div>
               </div>
@@ -220,16 +268,37 @@ function SiteMeters({
           })}
         </div>
       )}
+
+      {editing && profile ? (
+        <MeterRecordForm
+          siteName={siteName}
+          flat={editing.flat}
+          record={editing.record}
+          profileId={profile.id}
+          onClose={() => setEditing(null)}
+          onSaved={() => setEditing(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
+function OwnerRow({
+  row,
+  siteName,
+  onEdit,
+}: {
+  row: MeterFlatRow;
+  siteName: string;
+  onEdit: () => void;
+}) {
   const [thumb, setThumb] = useState<string | null>(null);
   const [busy, setBusy] = useState<"form" | "meter" | null>(null);
   const [open, setOpen] = useState(false);
   const done = isRecordComplete(row.record);
   const missing = missingMeterFields(row.record);
+  const rec = row.record;
+  const total = totalPiping(rec);
 
   useEffect(() => {
     let cancelled = false;
@@ -242,48 +311,63 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
   }, [row.record?.meter_photo_path]);
 
   const pdf = async (kind: "form" | "meter") => {
-    if (!row.record) return;
+    if (!rec) return;
     setBusy(kind);
     try {
-      const doc = await buildFormPdf(siteName, row.flat, row.record);
-      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, "form"));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const meterImage = async () => {
-    if (!row.record?.meter_photo_path) return;
-    setBusy("meter");
-    try {
-      const slug = siteName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
-      await shareMeterPhoto(
-        row.record.meter_photo_path,
-        `${slug}-${row.flat.flat_number}-meter`,
-      );
+      const doc =
+        kind === "form"
+          ? await buildFormPdf(siteName, row.flat, rec)
+          : await buildMeterPhotoPdf(siteName, row.flat, rec);
+      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, kind));
     } finally {
       setBusy(null);
     }
   };
 
   return (
-    <Card className="flex items-center gap-3 p-2.5">
-      <button onClick={() => setOpen(true)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+    <Card className="p-3">
+      <button
+        onClick={() => (rec ? setOpen(true) : onEdit())}
+        className="flex w-full items-start gap-3 text-left"
+      >
         <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-[10px] text-slate-400">
-          {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : done ? "…" : "—"}
+          {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : rec ? "…" : "—"}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-slate-900">
-            {row.flat.flat_number}
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold text-slate-900">{row.flat.flat_number}</p>
             {row.flat.consumer_name ? (
-              <span className="ml-2 text-sm font-normal text-slate-500">{row.flat.consumer_name}</span>
+              <span className="truncate text-sm font-normal text-slate-500">
+                {row.flat.consumer_name}
+              </span>
             ) : null}
-          </p>
-          <p className="truncate text-xs text-slate-500">
-            {done && row.record
-              ? `Meter no. ${row.record.meter_reading ?? "—"} · ${row.record.meter_make ?? "—"} · ${row.record.meter_side ?? "—"}`
-              : `BP ${row.flat.bp_number ?? "—"} · pending`}
-          </p>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+              }`}
+            >
+              {done ? "Done" : "Pending"}
+            </span>
+          </div>
+          {rec ? (
+            <>
+              <p className="mt-0.5 truncate text-xs text-slate-500">
+                Meter no. {rec.meter_reading ?? "—"} · {rec.meter_make ?? "—"} ·{" "}
+                {rec.meter_side ?? "—"}
+              </p>
+              <p
+                className={`mt-0.5 text-xs ${
+                  total != null ? "font-medium text-slate-700" : "font-medium text-amber-600"
+                }`}
+              >
+                {formatPiping(rec)}
+              </p>
+            </>
+          ) : (
+            <p className="mt-0.5 truncate text-xs text-slate-500">
+              BP {row.flat.bp_number ?? "—"} · not started
+            </p>
+          )}
           {!done && missing.length > 0 ? (
             <div className="mt-1 flex flex-wrap gap-1">
               {missing.slice(0, 2).map((m) => (
@@ -303,36 +387,52 @@ function OwnerRow({ row, siteName }: { row: MeterFlatRow; siteName: string }) {
           ) : null}
         </div>
       </button>
-      {done ? (
-        <div className="flex shrink-0 items-center gap-1.5">
-          <button
-            onClick={() => setOpen(true)}
-            className="rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-semibold text-brand-700 active:bg-brand-100"
-          >
-            View
-          </button>
-          <button
-            onClick={() => pdf("form")}
-            disabled={!!busy || !row.record?.form_photo_path}
-            className="rounded-lg bg-slate-100 px-2 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
-          >
-            {busy === "form" ? "…" : "Form"}
-          </button>
-          <button
-            onClick={meterImage}
-            disabled={!!busy || !row.record?.meter_photo_path}
-            className="rounded-lg bg-slate-100 px-2 py-1.5 text-xs font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40"
-          >
-            {busy === "meter" ? "…" : "Photo"}
-          </button>
-        </div>
-      ) : (
-        <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-          Pending
-        </span>
-      )}
 
-      {open ? <MeterViewer siteName={siteName} row={row} onClose={() => setOpen(false)} /> : null}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2">
+        {rec ? (
+          <>
+            <button
+              onClick={() => pdf("meter")}
+              disabled={!rec.meter_photo_path || !!busy}
+              className={actionPrimary}
+            >
+              {busy === "meter" ? "Building…" : "Meter photo PDF"}
+            </button>
+            <button
+              onClick={() => pdf("form")}
+              disabled={!rec.form_photo_path || !!busy}
+              className={actionSecondary}
+            >
+              {busy === "form" ? "Building…" : "GAIL form PDF"}
+            </button>
+            <button onClick={onEdit} className={actionGhost}>
+              Edit details
+            </button>
+            <button onClick={() => setOpen(true)} className={actionGhost}>
+              View
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onEdit}
+            className="w-full rounded-lg bg-brand-700 px-3 py-2 text-xs font-semibold text-white active:bg-brand-800"
+          >
+            + Add meter details
+          </button>
+        )}
+      </div>
+
+      {open ? (
+        <MeterViewer
+          siteName={siteName}
+          row={row}
+          onClose={() => setOpen(false)}
+          onEdit={() => {
+            setOpen(false);
+            onEdit();
+          }}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -341,16 +441,18 @@ function MeterViewer({
   siteName,
   row,
   onClose,
+  onEdit,
 }: {
   siteName: string;
   row: MeterFlatRow;
   onClose: () => void;
+  onEdit: () => void;
 }) {
   const rec = row.record;
   const [meter, setMeter] = useState<string | null>(null);
   const [valve, setValve] = useState<string | null>(null);
   const [form, setForm] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"form" | "meter" | null>(null);
+  const [busy, setBusy] = useState<"form" | "meter" | "meter-image" | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
 
@@ -375,8 +477,11 @@ function MeterViewer({
     if (!rec) return;
     setBusy(kind);
     try {
-      const doc = await buildFormPdf(siteName, row.flat, rec);
-      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, "form"));
+      const doc =
+        kind === "form"
+          ? await buildFormPdf(siteName, row.flat, rec)
+          : await buildMeterPhotoPdf(siteName, row.flat, rec);
+      await sharePdf(doc, pdfFileName(siteName, row.flat.flat_number, kind));
     } finally {
       setBusy(null);
     }
@@ -384,7 +489,7 @@ function MeterViewer({
 
   const meterImage = async () => {
     if (!rec?.meter_photo_path) return;
-    setBusy("meter");
+    setBusy("meter-image");
     try {
       const slug = siteName.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "");
       await shareMeterPhoto(rec.meter_photo_path, `${slug}-${row.flat.flat_number}-meter`);
@@ -416,6 +521,11 @@ function MeterViewer({
               <InfoRow label="Meter side" value={rec.meter_side ?? "—"} />
               <InfoRow label="GI piping" value={formatMeters(rec.gi_pipe_length_m)} />
               <InfoRow label="MLC piping" value={formatMeters(rec.mlc_pipe_length_m)} />
+              <InfoRow
+                label="Total piping"
+                value={totalPiping(rec) != null ? formatMeters(totalPiping(rec)) : "—"}
+                strong
+              />
               <InfoRow label="Work date" value={rec.work_date} />
               {rec.remarks ? <InfoRow label="Remarks" value={rec.remarks} /> : null}
             </div>
@@ -425,6 +535,39 @@ function MeterViewer({
                 Missing: {missingMeterFields(rec).join(", ")}
               </p>
             ) : null}
+
+            <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-brand-700">
+                For GAIL upload · flat {row.flat.flat_number}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button
+                  onClick={() => pdf("meter")}
+                  disabled={!!busy || !rec.meter_photo_path}
+                  className="text-xs"
+                >
+                  {busy === "meter" ? "Building…" : "Meter photo PDF"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => pdf("form")}
+                  disabled={!!busy || !rec.form_photo_path}
+                  className="text-xs"
+                >
+                  {busy === "form" ? "Building…" : "GAIL form PDF"}
+                </Button>
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-500">
+                The meter photo PDF also shows GI + MLC = total piping.
+              </p>
+              <button
+                onClick={meterImage}
+                disabled={!!busy || !rec.meter_photo_path}
+                className="mt-1.5 text-[10px] font-semibold text-slate-500 underline disabled:opacity-40"
+              >
+                {busy === "meter-image" ? "Preparing…" : "Save meter photo as image"}
+              </button>
+            </div>
 
             <div className="grid grid-cols-2 gap-2">
               <PhotoTile label="Meter photo" url={meter} onZoom={setZoom} />
@@ -446,28 +589,13 @@ function MeterViewer({
               </button>
             </div>
 
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => pdf("form")}
-                disabled={!!busy || !rec.form_photo_path}
-                className="flex-1 text-xs"
-              >
-                {busy === "form" ? "Building…" : "GAIL form PDF"}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={meterImage}
-                disabled={!!busy || !rec.meter_photo_path}
-                className="flex-1 text-xs"
-              >
-                {busy === "meter" ? "Preparing…" : "Meter photo (image)"}
-              </Button>
-            </div>
+            <Button variant="secondary" onClick={onEdit} className="w-full text-xs">
+              Edit meter details
+            </Button>
           </>
         ) : (
           <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-            Not recorded yet — the supervisor hasn't added meter details for this flat.
+            Not recorded yet — add the meter details for this flat.
           </p>
         )}
 

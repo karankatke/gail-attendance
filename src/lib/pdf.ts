@@ -104,6 +104,12 @@ function fieldRows(siteName: string, flat: SiteFlat, rec: MeterRecord): [string,
     ["Meter side", rec.meter_side ?? "—"],
     ["GI piping", rec.gi_pipe_length_m != null ? `${rec.gi_pipe_length_m.toFixed(2)} m` : "—"],
     ["MLC piping", rec.mlc_pipe_length_m != null ? `${rec.mlc_pipe_length_m.toFixed(2)} m` : "—"],
+    [
+      "Total piping",
+      rec.gi_pipe_length_m != null && rec.mlc_pipe_length_m != null
+        ? `${(rec.gi_pipe_length_m + rec.mlc_pipe_length_m).toFixed(2)} m (GI + MLC)`
+        : "—",
+    ],
     ["Work date", prettyDate(rec.work_date)],
   ];
   if (rec.remarks && rec.remarks.trim()) rows.push(["Remarks", rec.remarks.trim()]);

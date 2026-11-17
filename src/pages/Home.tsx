@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, Spinner } from "../components/ui";
 import { requireClient } from "../lib/supabase";
 import { fetchDayAttendance } from "../lib/db";
@@ -39,21 +39,26 @@ export function HomePage() {
     other: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [bataRows, setBataRows] = useState<BataReportRow[]>([]);
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
     const client = requireClient();
+    const seq = ++loadSeq.current;
     try {
       const [a, rep, bata] = await Promise.all([
         fetchDayAttendance(date),
         client.rpc("report_range", { p_from: date, p_to: date, p_include_monthly: true }),
         client.rpc("report_bata", { p_from: date, p_to: date }),
       ]);
+      if (seq !== loadSeq.current) return;
       setRows(a);
       const wages = ((rep.data ?? []) as ReportRow[]).reduce(
         (sum, r) => sum + Number(r.gross_pay),
         0,
       );
       const b = (bata.data ?? []) as BataReportRow[];
+      setBataRows(b);
       setCost({
         wages,
         bata: b.reduce((s, x) => s + Number(x.spent), 0),
@@ -63,7 +68,7 @@ export function HomePage() {
         other: b.reduce((s, x) => s + Number(x.other), 0),
       });
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [date]);
 
@@ -112,6 +117,13 @@ export function HomePage() {
 
   const headcount = totals.present + totals.half;
   const isToday = date === todayISO();
+  const bataBySupervisor = useMemo(
+    () =>
+      bataRows
+        .filter((b) => Number(b.spent) > 0)
+        .sort((a, b) => Number(b.spent) - Number(a.spent)),
+    [bataRows],
+  );
 
   return (
     <div className="space-y-4">
@@ -176,20 +188,47 @@ export function HomePage() {
             </div>
           </div>
           {cost.bata > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
-              <span>
-                Lunch <b className="text-slate-700">{formatINR(cost.lunch)}</b>
-              </span>
-              <span>
-                Travel <b className="text-slate-700">{formatINR(cost.travel)}</b>
-              </span>
-              <span>
-                Material <b className="text-slate-700">{formatINR(cost.material)}</b>
-              </span>
-              <span>
-                Other <b className="text-slate-700">{formatINR(cost.other)}</b>
-              </span>
-            </div>
+            <>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                <span>
+                  Lunch <b className="text-slate-700">{formatINR(cost.lunch)}</b>
+                </span>
+                <span>
+                  Travel <b className="text-slate-700">{formatINR(cost.travel)}</b>
+                </span>
+                <span>
+                  Material <b className="text-slate-700">{formatINR(cost.material)}</b>
+                </span>
+                <span>
+                  Other <b className="text-slate-700">{formatINR(cost.other)}</b>
+                </span>
+              </div>
+              {bataBySupervisor.length > 0 ? (
+                <div className="mt-2 border-t border-slate-100 pt-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    Bata by supervisor
+                  </p>
+                  <div className="mt-1 space-y-1">
+                    {bataBySupervisor.map((b) => (
+                      <div
+                        key={b.supervisor_profile_id}
+                        className="flex items-center justify-between gap-2 text-[11px]"
+                      >
+                        <span className="min-w-0 truncate text-slate-600">
+                          {b.supervisor_name}
+                        </span>
+                        <span className="shrink-0 font-semibold text-slate-800">
+                          {formatINR(b.spent)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[9px] text-slate-400">
+                    Bata is site cash spent by each supervisor.
+                  </p>
+                </div>
+              ) : null}
+            </>
           ) : null}
         </Card>
       ) : null}
