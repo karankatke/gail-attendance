@@ -22,6 +22,15 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+async function dataUrlImage(data: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("bad image"));
+    img.src = data;
+  });
+}
+
 async function loadImage(path: string | null): Promise<Img | null> {
   const url = await meterPhotoUrl(path);
   if (!url) return null;
@@ -29,17 +38,30 @@ async function loadImage(path: string | null): Promise<Img | null> {
     const res = await fetch(url);
     if (!res.ok) return null;
     const data = await blobToDataUrl(await res.blob());
-    const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-      img.onerror = () => reject(new Error("bad image"));
-      img.src = data;
-    });
-    if (!dims.w || !dims.h) return null;
-    return { data, width: dims.w, height: dims.h };
+    const img = await dataUrlImage(data);
+    if (!img.naturalWidth || !img.naturalHeight) return null;
+    return { data, width: img.naturalWidth, height: img.naturalHeight };
   } catch {
     return null;
   }
+}
+
+/**
+ * Re-encode the stored photo as a smaller JPEG. Only used when the
+ * photo-only PDF would otherwise cross the 1 MB upload limit.
+ */
+async function reencodeJpeg(img: Img, maxDim: number, quality: number): Promise<Img> {
+  const src = await dataUrlImage(img.data);
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const width = Math.max(1, Math.round(img.width * scale));
+  const height = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return img;
+  ctx.drawImage(src, 0, 0, width, height);
+  return { data: canvas.toDataURL("image/jpeg", quality), width, height };
 }
 
 /** Draw an image fitted into a box; returns the drawn height. */
@@ -98,7 +120,7 @@ function fieldRows(siteName: string, flat: SiteFlat, rec: MeterRecord): [string,
     ["Consumer name", flat.consumer_name ?? "—"],
     ["BP number", flat.bp_number ?? "—"],
     ["Application no.", flat.application_no ?? "—"],
-    ["Meter number", rec.meter_reading != null ? String(rec.meter_reading) : "—"],
+    ["Meter number", rec.meter_reading ?? "—"],
     ["Initial meter reading", rec.initial_meter_reading != null ? String(rec.initial_meter_reading) : "—"],
     ["Meter make", rec.meter_make ?? "—"],
     ["Meter side", rec.meter_side ?? "—"],
@@ -282,15 +304,56 @@ export async function buildFormPdf(
   return doc;
 }
 
+const PHOTO_PDF_LIMIT = 1_000_000;
+
+/**
+ * GAIL upload copy: the meter photo alone, as large as possible on the
+ * page. No headings, no fields, no footer. Kept under 1 MB.
+ */
 export async function buildMeterPhotoPdf(
-  siteName: string,
-  flat: SiteFlat,
+  _siteName: string,
+  _flat: SiteFlat,
   rec: MeterRecord,
 ): Promise<jsPDF> {
   const { jsPDF: JsPDF } = await import("jspdf");
-  const meterImg = await loadImage(rec.meter_photo_path);
-  const doc = new JsPDF({ unit: "mm", format: "a4" });
-  renderFlatPage(doc, siteName, flat, rec, meterImg, null, false);
+  const original = await loadImage(rec.meter_photo_path);
+  if (!original) throw new Error("No meter photo");
+
+  const make = (img: Img) => {
+    const doc = new JsPDF({
+      orientation: img.height >= img.width ? "portrait" : "landscape",
+      unit: "mm",
+      format: "a4",
+      compress: true,
+    });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 4;
+    const maxW = pageW - margin * 2;
+    const maxH = pageH - margin * 2;
+    const ratio = img.height / img.width;
+    let w = maxW;
+    let h = w * ratio;
+    if (h > maxH) {
+      h = maxH;
+      w = h / ratio;
+    }
+    doc.addImage(img.data, "JPEG", (pageW - w) / 2, (pageH - h) / 2, w, h);
+    return doc;
+  };
+
+  let doc = make(original);
+  if (doc.output("blob").size <= PHOTO_PDF_LIMIT) return doc;
+
+  for (const [maxDim, quality] of [
+    [1500, 0.72],
+    [1200, 0.62],
+    [900, 0.5],
+  ] as const) {
+    const smaller = await reencodeJpeg(original, maxDim, quality);
+    doc = make(smaller);
+    if (doc.output("blob").size <= PHOTO_PDF_LIMIT) return doc;
+  }
   return doc;
 }
 

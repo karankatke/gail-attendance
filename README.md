@@ -34,16 +34,19 @@ No app to install — it's just a website; add it to the home screen if you like
   absent counts, and **only the sites that were marked** for the day, with each worker and who marked them.
   Bata is also **split by supervisor**, so you can see how much site cash each one spent.
 - **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the **meter number**
-  and **initial meter reading**, meter make, work date, remarks and two photos (meter, stove) — each
-  photo can be taken with the camera or uploaded from the gallery — sees a done/pending progress bar,
-  and can view or download PDFs. Flats a supervisor adds by hand can be **edited or deleted**, as long
-  as no meter record exists; the owner can do the same from the owner meter view. The owner can also
-  **edit or complete any meter record**, including a missing meter number or form scan. The filled GAIL
-  paper form is captured with a full-screen **document scanner** (auto edge detection, optional corner
-  correction, colour/grey/B&W cleanup) and is required before a flat is marked done.
-  - **For GAIL upload** — two separate per-flat PDFs, available as soon as the photo exists:
-    the **meter photo PDF** (meter photo plus GI, MLC and **total piping = GI + MLC**) and the
-    **GAIL form PDF** (scanned form).
+  (free text, exactly as printed) and **initial meter reading**, meter make, work date, remarks and two
+  photos (meter, stove) — each photo can be taken with the camera or uploaded from the gallery — sees a
+  done/pending progress bar, and can view or download PDFs. Flats a supervisor adds by hand can be
+  **edited or deleted**, as long as no meter record exists; the owner can do the same from the owner
+  meter view. The owner can also **edit or complete any meter record**, including a missing meter
+  number or form scan. Every record shows **Recorded by** and, after a change, **Last edited by** with
+  the date and time, so supervisor and owner edits are tagged. The filled GAIL paper form is captured
+  with a full-screen **document scanner** (auto edge detection, optional corner correction,
+  colour/grey/B&W cleanup) and is required before a flat is marked done.
+  - **For GAIL upload** — two separate per-flat PDFs, available as soon as the photo exists. The
+    **meter photo PDF** is the **photo alone, full page, under 1 MB** (no headings or details). The
+    **GAIL form PDF** is the scanned form. GI, MLC and **total piping = GI + MLC** stay visible in the
+    app on the flat row and the flat viewer.
   - **Internal record** — the owner-only **full site PDF** (every detail and photo, one flat per page)
     and **tower PDFs**, which unlock only when every flat in that tower is complete.
   Photos are downscaled on the phone before upload.
@@ -146,7 +149,7 @@ Table | Purpose
 `bata_grants` | Cash given to a supervisor
 `bata_expenses` | What a supervisor spent
 `site_flats` | Master flat list per site (BP number, consumer, tower/floor)
-`meter_records` | One meter record per flat (number, readings, make, photos, form scan, status)
+`meter_records` | One meter record per flat (text meter number, readings, make, photos, form scan, status, recorded-by and last-edited-by)
 
 Report functions: `report_range(from,to,include_monthly)`, `report_by_location(from,to)`,
 `report_bata(from,to)`, `worker_monthly_accrual(worker,from,to)`. Access helpers: `login_directory()`,

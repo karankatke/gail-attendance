@@ -128,9 +128,7 @@ export function MeterRecordForm({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [reading, setReading] = useState(
-    record?.meter_reading != null ? String(record.meter_reading) : "",
-  );
+  const [reading, setReading] = useState(record?.meter_reading ?? "");
   const [initialReading, setInitialReading] = useState(
     record?.initial_meter_reading != null ? String(record.initial_meter_reading) : "",
   );
@@ -174,14 +172,9 @@ export function MeterRecordForm({
   const hasForm = !!formScan || (!!remoteForm && !!record?.form_photo_path);
 
   const save = async () => {
-    const readingText = reading.trim();
-    const initialText = initialReading.trim();
-    const readingNum = readingText === "" ? null : Number(readingText);
+    const readingValue = reading.trim() || null;
+    const initialText = initialReading.trim().replace(",", ".");
     const initialNum = initialText === "" ? null : Number(initialText);
-    if (readingText !== "" && !Number.isFinite(readingNum)) {
-      setError("Meter number must be a number.");
-      return;
-    }
     if (initialText !== "" && !Number.isFinite(initialNum)) {
       setError("Initial meter reading must be a number.");
       return;
@@ -191,7 +184,7 @@ export function MeterRecordForm({
       return;
     }
     const hasAny =
-      readingNum != null ||
+      readingValue != null ||
       initialNum != null ||
       make.trim() !== "" ||
       side != null ||
@@ -219,7 +212,7 @@ export function MeterRecordForm({
         : record?.form_photo_path ?? null;
 
       const complete =
-        readingNum != null &&
+        readingValue != null &&
         initialNum != null &&
         make.trim() !== "" &&
         side != null &&
@@ -234,7 +227,7 @@ export function MeterRecordForm({
       const row = await saveMeterRecord({
         site_flat_id: flat.id,
         location_id: flat.location_id,
-        meter_reading: readingNum,
+        meter_reading: readingValue,
         initial_meter_reading: initialNum,
         meter_make: make.trim() || null,
         meter_side: side,
@@ -247,6 +240,7 @@ export function MeterRecordForm({
         form_photo_path: formPath,
         status: complete ? "done" : "draft",
         created_by_profile_id: record?.created_by_profile_id ?? profileId,
+        updated_by_profile_id: profileId,
       });
       if (row) {
         setSaved(row);
@@ -384,7 +378,11 @@ export function MeterRecordForm({
               </Button>
             ) : null}
           </div>
-          {error ? <p className="text-sm text-slate-600">{error}</p> : null}
+          {error ? (
+            <p role="alert" className="rounded-xl bg-red-50 p-2.5 text-sm font-medium text-red-700">
+              {error}
+            </p>
+          ) : null}
           <Button onClick={onSaved} className="w-full">
             Done
           </Button>
@@ -394,7 +392,7 @@ export function MeterRecordForm({
   }
 
   const draftMissing = missingMeterFields({
-    meter_reading: reading.trim() === "" ? null : Number(reading),
+    meter_reading: reading.trim() || null,
     initial_meter_reading: initialReading.trim() === "" ? null : Number(initialReading),
     meter_make: make.trim() || null,
     meter_side: side,
@@ -428,13 +426,15 @@ export function MeterRecordForm({
 
         <Field label="Meter number">
           <input
-            inputMode="decimal"
             value={reading}
             onChange={(e) => setReading(e.target.value)}
             className={inputClass}
-            placeholder="e.g. 00123.450"
+            placeholder="e.g. 18002411A"
           />
         </Field>
+        <p className="-mt-2 text-[11px] text-slate-400">
+          Use exactly what is printed on the meter — letters and numbers are both fine.
+        </p>
         <Field label="Initial meter reading">
           <input
             inputMode="decimal"
@@ -559,7 +559,11 @@ export function MeterRecordForm({
           />
         </Field>
 
-        {error ? <p className="text-sm text-slate-600">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="rounded-xl bg-red-50 p-2.5 text-sm font-medium text-red-700">
+            {error}
+          </p>
+        ) : null}
 
         <Button onClick={save} disabled={busy} className="w-full">
           {busy ? "Saving…" : record ? "Save changes" : "Save meter details"}

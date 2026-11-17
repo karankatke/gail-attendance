@@ -109,7 +109,7 @@ export function isRecordComplete(rec: MeterRecord | null): boolean {
 export function missingMeterFields(rec: Partial<MeterRecord> | null): string[] {
   if (!rec) return ["Not started"];
   const out: string[] = [];
-  if (rec.meter_reading == null) out.push("Meter number");
+  if (!rec.meter_reading?.trim()) out.push("Meter number");
   if (rec.initial_meter_reading == null) out.push("Initial reading");
   if (!rec.meter_make?.trim()) out.push("Meter make");
   if (!rec.meter_side) out.push("LHS/RHS");

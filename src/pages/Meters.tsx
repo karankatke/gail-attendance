@@ -21,7 +21,7 @@ import {
   pdfFileName,
   sharePdf,
 } from "../lib/pdf";
-import type { MeterFlatRow, MeterRecord, SiteFlat, WorkLocation } from "../lib/types";
+import type { MeterFlatRow, MeterRecord, Profile, SiteFlat, WorkLocation } from "../lib/types";
 
 const actionPrimary =
   "rounded-lg bg-brand-50 px-2.5 py-1.5 text-[11px] font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40";
@@ -30,11 +30,28 @@ const actionSecondary =
 const actionGhost =
   "rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 active:bg-slate-100 disabled:opacity-40";
 
+function stamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function MetersPage() {
   const { rows: locations } = useTable<WorkLocation>("locations", { orderColumn: "name" });
   const { rows: flats, loading: flatsLoading } = useTable<SiteFlat>("site_flats");
   const { rows: records, loading: recLoading } = useTable<MeterRecord>("meter_records");
+  const { rows: profiles } = useTable<Profile>("profiles", { orderColumn: "display_name" });
   const [openSite, setOpenSite] = useState<string | null>(null);
+
+  const profileNames = useMemo(
+    () => new Map(profiles.map((p) => [p.id, p.display_name])),
+    [profiles],
+  );
 
   const recordByFlat = useMemo(() => {
     const m = new Map<string, MeterRecord>();
@@ -64,6 +81,7 @@ export function MetersPage() {
       <SiteMeters
         siteName={loc?.name ?? "Site"}
         rows={rows}
+        profileNames={profileNames}
         onBack={() => setOpenSite(null)}
       />
     );
@@ -115,10 +133,12 @@ export function MetersPage() {
 function SiteMeters({
   siteName,
   rows,
+  profileNames,
   onBack,
 }: {
   siteName: string;
   rows: MeterFlatRow[];
+  profileNames: Map<string, string>;
   onBack: () => void;
 }) {
   const { profile } = useAuth();
@@ -197,9 +217,9 @@ function SiteMeters({
           </span>
         </div>
         <p className="text-[11px] text-slate-500">
-          Each flat has its own <b>meter photo PDF</b> (with GI + MLC = total piping) and{" "}
-          <b>GAIL form PDF</b>. They are available as soon as the photo exists — no need to wait
-          for the tower.
+          Each flat has its own <b>meter photo PDF</b> — just the photo, full page and under 1 MB —
+          and a <b>GAIL form PDF</b>. Both are available as soon as the file exists, without waiting
+          for the tower. GI, MLC and total piping stay visible on each flat.
         </p>
       </Card>
 
@@ -259,6 +279,7 @@ function SiteMeters({
                       key={r.flat.id}
                       row={r}
                       siteName={siteName}
+                      profileNames={profileNames}
                       onEdit={() => setEditing(r)}
                     />
                   ))}
@@ -286,10 +307,12 @@ function SiteMeters({
 function OwnerRow({
   row,
   siteName,
+  profileNames,
   onEdit,
 }: {
   row: MeterFlatRow;
   siteName: string;
+  profileNames: Map<string, string>;
   onEdit: () => void;
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
@@ -299,6 +322,13 @@ function OwnerRow({
   const missing = missingMeterFields(row.record);
   const rec = row.record;
   const total = totalPiping(rec);
+  const recordedBy = rec?.created_by_profile_id
+    ? profileNames.get(rec.created_by_profile_id) ?? "—"
+    : null;
+  const editedBy =
+    rec?.updated_by_profile_id && rec.updated_at !== rec.created_at
+      ? profileNames.get(rec.updated_by_profile_id) ?? "—"
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -362,6 +392,12 @@ function OwnerRow({
               >
                 {formatPiping(rec)}
               </p>
+              {recordedBy ? (
+                <p className="mt-0.5 text-[10px] text-slate-400">
+                  Recorded by {recordedBy}
+                  {editedBy ? ` · edited by ${editedBy}` : ""}
+                </p>
+              ) : null}
             </>
           ) : (
             <p className="mt-0.5 truncate text-xs text-slate-500">
@@ -426,6 +462,7 @@ function OwnerRow({
         <MeterViewer
           siteName={siteName}
           row={row}
+          profileNames={profileNames}
           onClose={() => setOpen(false)}
           onEdit={() => {
             setOpen(false);
@@ -440,15 +477,24 @@ function OwnerRow({
 function MeterViewer({
   siteName,
   row,
+  profileNames,
   onClose,
   onEdit,
 }: {
   siteName: string;
   row: MeterFlatRow;
+  profileNames: Map<string, string>;
   onClose: () => void;
   onEdit: () => void;
 }) {
   const rec = row.record;
+  const recordedBy = rec?.created_by_profile_id
+    ? profileNames.get(rec.created_by_profile_id) ?? "—"
+    : null;
+  const editedBy =
+    rec?.updated_by_profile_id && rec.updated_at !== rec.created_at
+      ? profileNames.get(rec.updated_by_profile_id) ?? "—"
+      : null;
   const [meter, setMeter] = useState<string | null>(null);
   const [valve, setValve] = useState<string | null>(null);
   const [form, setForm] = useState<string | null>(null);
@@ -512,7 +558,7 @@ function MeterViewer({
         {rec ? (
           <>
             <div className="rounded-xl bg-brand-50 p-3 text-sm">
-              <InfoRow label="Meter number" value={rec.meter_reading != null ? String(rec.meter_reading) : "—"} strong />
+              <InfoRow label="Meter number" value={rec.meter_reading ?? "—"} strong />
               <InfoRow
                 label="Initial meter reading"
                 value={rec.initial_meter_reading != null ? String(rec.initial_meter_reading) : "—"}
@@ -527,6 +573,12 @@ function MeterViewer({
                 strong
               />
               <InfoRow label="Work date" value={rec.work_date} />
+              {recordedBy ? (
+                <InfoRow label="Recorded by" value={`${recordedBy} · ${stamp(rec.created_at)}`} />
+              ) : null}
+              {editedBy ? (
+                <InfoRow label="Last edited by" value={`${editedBy} · ${stamp(rec.updated_at)}`} />
+              ) : null}
               {rec.remarks ? <InfoRow label="Remarks" value={rec.remarks} /> : null}
             </div>
 
@@ -558,7 +610,7 @@ function MeterViewer({
                 </Button>
               </div>
               <p className="mt-1.5 text-[10px] text-slate-500">
-                The meter photo PDF also shows GI + MLC = total piping.
+                The meter photo PDF is the photo alone — full page, under 1 MB, ready to upload.
               </p>
               <button
                 onClick={meterImage}

@@ -237,7 +237,7 @@ export async function enroll(profileId: string, pin: string): Promise<{ email: s
 export async function saveMeterRecord(input: {
   site_flat_id: string;
   location_id: string;
-  meter_reading: number | null;
+  meter_reading: string | null;
   initial_meter_reading: number | null;
   meter_make: string | null;
   meter_side: MeterSide | null;
@@ -250,6 +250,7 @@ export async function saveMeterRecord(input: {
   form_photo_path: string | null;
   status: MeterStatus;
   created_by_profile_id: string | null;
+  updated_by_profile_id: string | null;
 }): Promise<MeterRecord | null> {
   const client = requireClient();
   const { data, error } = await client
