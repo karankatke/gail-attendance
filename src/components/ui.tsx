@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useBackLayer } from "../lib/back";
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
@@ -74,6 +75,7 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
 }) {
+  useBackLayer(true, onClose);
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center">
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 sm:rounded-3xl">

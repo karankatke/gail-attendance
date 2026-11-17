@@ -49,6 +49,9 @@ No app to install — it's just a website; add it to the home screen if you like
     app on the flat row and the flat viewer.
   - **Internal record** — the owner-only **full site PDF** (every detail and photo, one flat per page)
     and **tower PDFs**, which unlock only when every flat in that tower is complete.
+  - Every download action has a **download icon**, and the meter photo has a **Share** action for
+    WhatsApp and other apps. The back button closes the open form or site one step at a time instead
+    of leaving the app. Deleting a record asks for confirmation and lists what will be removed.
   Photos are downscaled on the phone before upload.
 - Live sync across all phones via Supabase Realtime.
 

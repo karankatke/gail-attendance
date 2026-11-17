@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Empty, Modal, Spinner } from "../components/ui";
 import { useTable } from "../hooks/useTable";
 import { useAuth } from "../context/AuthContext";
+import { useBackLayer } from "../lib/back";
 import { FlatEditForm } from "../components/FlatEditForm";
 import { MeterRecordForm } from "../components/MeterRecordForm";
+import { DownloadIcon, ShareIcon } from "../components/icons";
 import {
   flatSort,
   formatMeters,
@@ -24,11 +26,11 @@ import {
 import type { MeterFlatRow, MeterRecord, Profile, SiteFlat, WorkLocation } from "../lib/types";
 
 const actionPrimary =
-  "rounded-lg bg-brand-50 px-2.5 py-1.5 text-[11px] font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40";
+  "inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1.5 text-[11px] font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40";
 const actionSecondary =
-  "rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40";
+  "inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 active:bg-slate-200 disabled:opacity-40";
 const actionGhost =
-  "rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 active:bg-slate-100 disabled:opacity-40";
+  "inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 active:bg-slate-100 disabled:opacity-40";
 
 function stamp(iso: string): string {
   const d = new Date(iso);
@@ -47,6 +49,8 @@ export function MetersPage() {
   const { rows: records, loading: recLoading } = useTable<MeterRecord>("meter_records");
   const { rows: profiles } = useTable<Profile>("profiles", { orderColumn: "display_name" });
   const [openSite, setOpenSite] = useState<string | null>(null);
+
+  useBackLayer(!!openSite, () => setOpenSite(null));
 
   const profileNames = useMemo(
     () => new Map(profiles.map((p) => [p.id, p.display_name])),
@@ -228,11 +232,14 @@ function SiteMeters({
           Internal record
         </p>
         <Button onClick={combined} disabled={busy || doneRows.length === 0} className="w-full">
-          {busy
-            ? progress
-              ? `Building… ${progress.done}/${progress.total}`
-              : "Building…"
-            : `Download full site PDF (${doneRows.length} complete)`}
+          <span className="inline-flex items-center justify-center gap-1.5">
+            <DownloadIcon />
+            {busy
+              ? progress
+                ? `Building… ${progress.done}/${progress.total}`
+                : "Building…"
+              : `Download full site PDF (${doneRows.length} complete)`}
+          </span>
         </Button>
         <p className="text-[11px] text-slate-400">
           All details, photos and form scans, one flat per page. Tower PDFs unlock when every flat
@@ -259,12 +266,13 @@ function SiteMeters({
                     <button
                       onClick={() => towerPdf(tower, list)}
                       disabled={!allComplete || towerBusy === tower}
-                      className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
+                      className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
                         allComplete
                           ? "bg-brand-50 text-brand-700 active:bg-brand-100"
                           : "bg-slate-100 text-slate-400"
                       } disabled:opacity-60`}
                     >
+                      {allComplete ? <DownloadIcon className="h-3 w-3" /> : null}
                       {towerBusy === tower
                         ? "Building…"
                         : allComplete
@@ -432,6 +440,7 @@ function OwnerRow({
               disabled={!rec.meter_photo_path || !!busy}
               className={actionPrimary}
             >
+              <DownloadIcon className="h-3 w-3" />
               {busy === "meter" ? "Building…" : "Meter photo PDF"}
             </button>
             <button
@@ -439,6 +448,7 @@ function OwnerRow({
               disabled={!rec.form_photo_path || !!busy}
               className={actionSecondary}
             >
+              <DownloadIcon className="h-3 w-3" />
               {busy === "form" ? "Building…" : "GAIL form PDF"}
             </button>
             <button onClick={onEdit} className={actionGhost}>
@@ -598,7 +608,10 @@ function MeterViewer({
                   disabled={!!busy || !rec.meter_photo_path}
                   className="text-xs"
                 >
-                  {busy === "meter" ? "Building…" : "Meter photo PDF"}
+                  <span className="inline-flex items-center justify-center gap-1.5">
+                    <DownloadIcon />
+                    {busy === "meter" ? "Building…" : "Meter photo PDF"}
+                  </span>
                 </Button>
                 <Button
                   variant="secondary"
@@ -606,7 +619,10 @@ function MeterViewer({
                   disabled={!!busy || !rec.form_photo_path}
                   className="text-xs"
                 >
-                  {busy === "form" ? "Building…" : "GAIL form PDF"}
+                  <span className="inline-flex items-center justify-center gap-1.5">
+                    <DownloadIcon />
+                    {busy === "form" ? "Building…" : "GAIL form PDF"}
+                  </span>
                 </Button>
               </div>
               <p className="mt-1.5 text-[10px] text-slate-500">
@@ -615,9 +631,10 @@ function MeterViewer({
               <button
                 onClick={meterImage}
                 disabled={!!busy || !rec.meter_photo_path}
-                className="mt-1.5 text-[10px] font-semibold text-slate-500 underline disabled:opacity-40"
+                className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 underline disabled:opacity-40"
               >
-                {busy === "meter-image" ? "Preparing…" : "Save meter photo as image"}
+                <ShareIcon className="h-3 w-3" />
+                {busy === "meter-image" ? "Preparing…" : "Share meter photo"}
               </button>
             </div>
 

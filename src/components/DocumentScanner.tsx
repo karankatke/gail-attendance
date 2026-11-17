@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CornerPoints, CornerEditor } from "scanic";
 import { applyScanFilter, canvasToJpeg, type ScanFilter } from "../lib/scanFilter";
+import { useBackLayer } from "../lib/back";
 
 type Stage = "pick" | "detect" | "adjust" | "preview";
 
@@ -25,6 +26,8 @@ export function DocumentScanner({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
+
+  useBackLayer(true, onClose);
 
   const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);

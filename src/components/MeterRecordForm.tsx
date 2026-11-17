@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, inputClass } from "./ui";
 import { DocumentScanner } from "./DocumentScanner";
+import { DownloadIcon, ShareIcon } from "./icons";
 import { removeRow, saveMeterRecord } from "../lib/db";
 import { todayISO } from "../lib/dates";
 import { buildFormPdf, buildMeterPhotoPdf, pdfFileName, sharePdf } from "../lib/pdf";
@@ -26,10 +27,12 @@ function PhotoField({
   label,
   preview,
   onChange,
+  removeLabel = "Remove",
 }: {
   label: string;
   preview: string | null;
   onChange: (v: { blob: Blob; url: string } | null) => void;
+  removeLabel?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -80,7 +83,7 @@ function PhotoField({
               onClick={() => onChange(null)}
               className="px-1 text-left text-xs font-semibold text-red-600 active:text-red-700"
             >
-              Remove
+              {removeLabel}
             </button>
           ) : (
             <span className="px-1 text-[11px] text-slate-400">Required</span>
@@ -145,6 +148,8 @@ export function MeterRecordForm({
   const [remoteValve, setRemoteValve] = useState<string | null>(null);
   const [remoteForm, setRemoteForm] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
+  const [removed, setRemoved] = useState({ meter: false, valve: false, form: false });
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [saved, setSaved] = useState<MeterRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState<PdfBusy>(null);
@@ -167,9 +172,32 @@ export function MeterRecordForm({
     };
   }, [record?.meter_photo_path, record?.valve_photo_path, record?.form_photo_path]);
 
-  const hasMeter = !!meter || (!!remoteMeter && !!record?.meter_photo_path);
-  const hasValve = !!valve || (!!remoteValve && !!record?.valve_photo_path);
-  const hasForm = !!formScan || (!!remoteForm && !!record?.form_photo_path);
+  const hasMeter = !removed.meter && (!!meter || (!!remoteMeter && !!record?.meter_photo_path));
+  const hasValve = !removed.valve && (!!valve || (!!remoteValve && !!record?.valve_photo_path));
+  const hasForm = !removed.form && (!!formScan || (!!remoteForm && !!record?.form_photo_path));
+
+  const changePhoto = (
+    kind: "meter" | "valve",
+    next: { blob: Blob; url: string } | null,
+  ) => {
+    const current = kind === "meter" ? meter : valve;
+    if (kind === "meter") setMeter(next);
+    else setValve(next);
+    if (next) {
+      setRemoved((r) => ({ ...r, [kind]: false }));
+      return;
+    }
+    if (!current) setRemoved((r) => ({ ...r, [kind]: true }));
+  };
+
+  const clearForm = () => {
+    if (formScan) {
+      setFormScan(null);
+      return;
+    }
+    setRemoteForm(null);
+    setRemoved((r) => ({ ...r, form: true }));
+  };
 
   const save = async () => {
     const readingValue = reading.trim() || null;
@@ -201,15 +229,21 @@ export function MeterRecordForm({
     setBusy(true);
     setError(null);
     try {
-      const meterPath = meter
-        ? await uploadMeterPhoto(flat.location_id, flat.id, "meter", meter.blob)
-        : record?.meter_photo_path ?? null;
-      const valvePath = valve
-        ? await uploadMeterPhoto(flat.location_id, flat.id, "valve", valve.blob)
-        : record?.valve_photo_path ?? null;
-      const formPath = formScan
-        ? await uploadMeterPhoto(flat.location_id, flat.id, "form", formScan.blob)
-        : record?.form_photo_path ?? null;
+      const meterPath = removed.meter
+        ? null
+        : meter
+          ? await uploadMeterPhoto(flat.location_id, flat.id, "meter", meter.blob)
+          : record?.meter_photo_path ?? null;
+      const valvePath = removed.valve
+        ? null
+        : valve
+          ? await uploadMeterPhoto(flat.location_id, flat.id, "valve", valve.blob)
+          : record?.valve_photo_path ?? null;
+      const formPath = removed.form
+        ? null
+        : formScan
+          ? await uploadMeterPhoto(flat.location_id, flat.id, "form", formScan.blob)
+          : record?.form_photo_path ?? null;
 
       const complete =
         readingValue != null &&
@@ -301,12 +335,14 @@ export function MeterRecordForm({
   const del = async () => {
     if (!record) return;
     setBusy(true);
+    setError(null);
     try {
       await removeRow("meter_records", record.id);
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete");
       setBusy(false);
+      setConfirmDelete(false);
     }
   };
 
@@ -354,7 +390,10 @@ export function MeterRecordForm({
                 disabled={!!pdfBusy}
                 className="w-full"
               >
-                {pdfBusy === "meter" ? "Building…" : "Download meter photo PDF"}
+                <span className="inline-flex items-center justify-center gap-1.5">
+                  <DownloadIcon />
+                  {pdfBusy === "meter" ? "Building…" : "Download meter photo PDF"}
+                </span>
               </Button>
             ) : null}
             {saved.form_photo_path ? (
@@ -364,7 +403,10 @@ export function MeterRecordForm({
                 disabled={!!pdfBusy}
                 className="w-full"
               >
-                {pdfBusy === "form" ? "Building…" : "Download GAIL form PDF"}
+                <span className="inline-flex items-center justify-center gap-1.5">
+                  <DownloadIcon />
+                  {pdfBusy === "form" ? "Building…" : "Download GAIL form PDF"}
+                </span>
               </Button>
             ) : null}
             {saved.meter_photo_path ? (
@@ -374,7 +416,10 @@ export function MeterRecordForm({
                 disabled={!!pdfBusy}
                 className="w-full text-xs"
               >
-                {pdfBusy === "meter-image" ? "Preparing…" : "Save meter photo as image"}
+                <span className="inline-flex items-center justify-center gap-1.5">
+                  <ShareIcon />
+                  {pdfBusy === "meter-image" ? "Preparing…" : "Share meter photo"}
+                </span>
               </Button>
             ) : null}
           </div>
@@ -496,12 +541,31 @@ export function MeterRecordForm({
         </div>
 
         <div>
-          <PhotoField label="Meter photo" preview={meter?.url ?? remoteMeter} onChange={setMeter} />
+          <PhotoField
+            label="Meter photo"
+            preview={meter?.url ?? (removed.meter ? null : remoteMeter)}
+            onChange={(v) => changePhoto("meter", v)}
+            removeLabel={
+              meter ? (remoteMeter ? "Cancel new photo" : "Remove photo") : "Remove saved photo"
+            }
+          />
           <p className="mt-1 text-[11px] text-slate-400">
             Make sure the meter number and meter make are clearly visible.
           </p>
+          {meter && remoteMeter ? (
+            <p className="mt-1 text-[11px] font-medium text-brand-700">
+              New photo selected — save to replace the saved photo, or cancel the new one.
+            </p>
+          ) : null}
         </div>
-        <PhotoField label="Stove photo (on)" preview={valve?.url ?? remoteValve} onChange={setValve} />
+        <PhotoField
+          label="Stove photo (on)"
+          preview={valve?.url ?? (removed.valve ? null : remoteValve)}
+          onChange={(v) => changePhoto("valve", v)}
+          removeLabel={
+            valve ? (remoteValve ? "Cancel new photo" : "Remove photo") : "Remove saved photo"
+          }
+        />
 
         <div className="rounded-xl border border-slate-200 p-3">
           <div className="flex items-start justify-between gap-2">
@@ -520,14 +584,14 @@ export function MeterRecordForm({
             )}
           </div>
 
-          {formScan?.url ?? remoteForm ? (
+          {formScan?.url ?? (removed.form ? null : remoteForm) ? (
             <button
               type="button"
               onClick={() => setScanOpen(true)}
               className="mt-2 block w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
             >
               <img
-                src={(formScan?.url ?? remoteForm) || ""}
+                src={formScan?.url ?? (removed.form ? "" : remoteForm) ?? ""}
                 alt="GAIL form"
                 className="max-h-56 w-full object-contain"
               />
@@ -542,9 +606,13 @@ export function MeterRecordForm({
             >
               {hasForm ? "Rescan form" : "Scan form"}
             </Button>
-            {formScan ? (
-              <Button variant="ghost" onClick={() => setFormScan(null)} className="text-xs">
-                Remove
+            {hasForm ? (
+              <Button variant="ghost" onClick={clearForm} className="text-xs">
+                {formScan
+                  ? remoteForm
+                    ? "Cancel new scan"
+                    : "Remove scan"
+                  : "Remove saved scan"}
               </Button>
             ) : null}
           </div>
@@ -565,7 +633,7 @@ export function MeterRecordForm({
           </p>
         ) : null}
 
-        <Button onClick={save} disabled={busy} className="w-full">
+        <Button onClick={save} disabled={busy} className="w-full py-4 text-base shadow-md">
           {busy ? "Saving…" : record ? "Save changes" : "Save meter details"}
         </Button>
 
@@ -581,7 +649,10 @@ export function MeterRecordForm({
                 disabled={!!pdfBusy || !record.meter_photo_path}
                 className="text-xs"
               >
-                {pdfBusy === "meter" ? "Building…" : "Meter photo PDF"}
+                <span className="inline-flex items-center justify-center gap-1.5">
+                  <DownloadIcon />
+                  {pdfBusy === "meter" ? "Building…" : "Meter photo PDF"}
+                </span>
               </Button>
               <Button
                 variant="secondary"
@@ -589,7 +660,10 @@ export function MeterRecordForm({
                 disabled={!!pdfBusy || !record.form_photo_path}
                 className="text-xs"
               >
-                {pdfBusy === "form" ? "Building…" : "GAIL form PDF"}
+                <span className="inline-flex items-center justify-center gap-1.5">
+                  <DownloadIcon />
+                  {pdfBusy === "form" ? "Building…" : "GAIL form PDF"}
+                </span>
               </Button>
             </div>
             <Button
@@ -598,9 +672,12 @@ export function MeterRecordForm({
               disabled={!!pdfBusy || !record.meter_photo_path}
               className="w-full text-xs"
             >
-              {pdfBusy === "meter-image" ? "Preparing…" : "Save meter photo as image"}
+              <span className="inline-flex items-center justify-center gap-1.5">
+                <ShareIcon />
+                {pdfBusy === "meter-image" ? "Preparing…" : "Share meter photo"}
+              </span>
             </Button>
-            <Button variant="danger" onClick={del} disabled={busy} className="w-full">
+            <Button variant="danger" onClick={() => setConfirmDelete(true)} disabled={busy} className="w-full">
               Delete record
             </Button>
           </div>
@@ -613,9 +690,47 @@ export function MeterRecordForm({
           onClose={() => setScanOpen(false)}
           onDone={({ blob, url }) => {
             setFormScan({ blob, url });
+            setRemoved((r) => ({ ...r, form: false }));
             setScanOpen(false);
           }}
         />
+      ) : null}
+
+      {confirmDelete ? (
+        <Modal
+          title="Delete meter record?"
+          onClose={() => {
+            if (!busy) setConfirmDelete(false);
+          }}
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl bg-red-50 p-3 text-sm text-red-800">
+              <p className="font-semibold">
+                Everything recorded for Flat {flat.flat_number} will be deleted.
+              </p>
+              <p className="mt-1 text-xs">
+                Meter number, readings, piping, photos, GAIL form and remarks. This cannot be
+                undone.
+              </p>
+            </div>
+            {error ? (
+              <p role="alert" className="rounded-xl bg-red-50 p-2.5 text-sm font-medium text-red-700">
+                {error}
+              </p>
+            ) : null}
+            <Button variant="danger" onClick={del} disabled={busy} className="w-full py-3">
+              {busy ? "Deleting…" : "Yes, delete the whole record"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmDelete(false)}
+              disabled={busy}
+              className="w-full"
+            >
+              Cancel
+            </Button>
+          </div>
+        </Modal>
       ) : null}
     </Modal>
   );

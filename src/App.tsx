@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { isConfigured } from "./lib/env";
+import { installBackGuard, useBackLayer } from "./lib/back";
 import { Layout, OWNER_TABS, SUPERVISOR_TABS } from "./components/Layout";
 import { LoginScreen } from "./components/LoginScreen";
 import { SetupScreen } from "./components/SetupScreen";
@@ -29,6 +30,7 @@ const SUPERVISOR_TITLES: Record<string, { title: string; subtitle?: string }> = 
 function OwnerApp() {
   const [tab, setTab] = useState("home");
   const meta = OWNER_TITLES[tab] ?? OWNER_TITLES.home;
+  useBackLayer(tab !== "home", () => setTab("home"));
   return (
     <Layout tabs={OWNER_TABS} tab={tab} onTab={setTab} title={meta.title} subtitle={meta.subtitle}>
       {tab === "home" ? <HomePage /> : null}
@@ -42,6 +44,7 @@ function OwnerApp() {
 function SupervisorApp() {
   const [tab, setTab] = useState("attendance");
   const meta = SUPERVISOR_TITLES[tab] ?? SUPERVISOR_TITLES.attendance;
+  useBackLayer(tab !== "attendance", () => setTab("attendance"));
   return (
     <Layout tabs={SUPERVISOR_TABS} tab={tab} onTab={setTab} title={meta.title} subtitle={meta.subtitle}>
       {tab === "attendance" ? <SupervisorAttendancePage /> : null}
@@ -60,6 +63,9 @@ function Root() {
 }
 
 export default function App() {
+  useEffect(() => {
+    installBackGuard();
+  }, []);
   return (
     <AuthProvider>
       <Root />
