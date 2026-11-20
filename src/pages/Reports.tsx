@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Button, Card, Field, Modal, Spinner, inputClass } from "../components/ui";
 import { WorkerReportSheet } from "../components/WorkerReport";
 import { LegendLink, LegendModal } from "../components/Legend";
-import { BudgetSection, shortWeekLabel, type BudgetWeek } from "../components/Budget";
+import { TrendsSection } from "../components/Trends";
 import { useTable } from "../hooks/useTable";
 import { requireClient } from "../lib/supabase";
 import { fetchDayAttendance, insertRow, removeRow, updateRow } from "../lib/db";
@@ -60,7 +60,6 @@ export function ReportsPage() {
   const [editingAdjust, setEditingAdjust] = useState<Advance | null>(null);
   const [addingFor, setAddingFor] = useState<ReportRow | null>(null);
   const [summary, setSummary] = useState<{ from: string; to: string } | null>(null);
-  const [grantOpen, setGrantOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [todayOpen, setTodayOpen] = useState(false);
   const [todayLoading, setTodayLoading] = useState(false);
@@ -69,10 +68,6 @@ export function ReportsPage() {
   const [query, setQuery] = useState("");
   const [selectedWorker, setSelectedWorker] = useState<ReportRow | null>(null);
   const [legendOpen, setLegendOpen] = useState(false);
-  const [budgetWeeks, setBudgetWeeks] = useState<BudgetWeek[]>([]);
-  const [budgetLoading, setBudgetLoading] = useState(true);
-  const [plannedWorkerDays, setPlannedWorkerDays] = useState(0);
-  const plannedTouched = useRef(false);
 
   const { rows: workers } = useTable<Worker>("workers", { orderColumn: "name" });
   const { rows: locations } = useTable<WorkLocation>("locations", { orderColumn: "name" });
@@ -172,90 +167,6 @@ export function ReportsPage() {
     };
   }, [load, refreshKey]);
 
-  useEffect(() => {
-    let active = true;
-    setBudgetLoading(true);
-    (async () => {
-      const client = requireClient();
-      const thisWeek = weekRange(todayISO());
-      const first = await client
-        .from("attendance")
-        .select("work_date")
-        .order("work_date", { ascending: true })
-        .limit(1);
-      const dataStart =
-        ((first.data ?? []) as { work_date: string }[])[0]?.work_date ?? null;
-      const ranges = Array.from({ length: 8 }, (_, i) => {
-        const idx = 7 - i;
-        const from = addDays(thisWeek.from, -7 * idx);
-        return { from, to: addDays(from, 6), current: idx === 0 };
-      });
-      const weeks = await Promise.all(
-        ranges.map(async (r) => {
-          const [rep, bata, att] = await Promise.all([
-            client.rpc("report_range", { p_from: r.from, p_to: r.to, p_include_monthly: true }),
-            client.rpc("report_bata", { p_from: r.from, p_to: r.to }),
-            client
-              .from("attendance")
-              .select("id", { count: "exact", head: true })
-              .gte("work_date", r.from)
-              .lte("work_date", r.to),
-          ]);
-          const rows = (rep.data ?? []) as ReportRow[];
-          const b = (bata.data ?? []) as BataReportRow[];
-          return {
-            from: r.from,
-            to: r.to,
-            label: shortWeekLabel(r.from),
-            workerDays: att.count ?? 0,
-            wages: rows.reduce((s, x) => s + Number(x.gross_pay), 0),
-            bata: b.reduce((s, x) => s + Number(x.spent), 0),
-            lunch: b.reduce((s, x) => s + Number(x.lunch), 0),
-            travel: b.reduce((s, x) => s + Number(x.travel), 0),
-            material: b.reduce((s, x) => s + Number(x.material), 0),
-            other: b.reduce((s, x) => s + Number(x.other), 0),
-            current: r.current,
-            partial: dataStart ? r.from < dataStart : false,
-          } satisfies BudgetWeek;
-        }),
-      );
-      if (!active) return;
-      setBudgetWeeks(weeks);
-      setBudgetLoading(false);
-    })().catch(() => {
-      if (active) setBudgetLoading(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [refreshKey]);
-
-  const baseline = useMemo(() => {
-    const complete = budgetWeeks
-      .filter((w) => !w.current && !w.partial && w.workerDays > 0)
-      .slice(-4);
-    const wd = complete.reduce((s, w) => s + w.workerDays, 0);
-    return {
-      count: complete.length,
-      wagePerDay: wd ? complete.reduce((s, w) => s + w.wages, 0) / wd : 0,
-      bataPerDay: wd ? complete.reduce((s, w) => s + w.bata, 0) / wd : 0,
-    };
-  }, [budgetWeeks]);
-
-  useEffect(() => {
-    if (plannedTouched.current || baseline.count === 0) return;
-    const complete = budgetWeeks
-      .filter((w) => !w.current && !w.partial && w.workerDays > 0)
-      .slice(-4);
-    const avg = complete.reduce((s, w) => s + w.workerDays, 0) / complete.length;
-    setPlannedWorkerDays(Math.max(1, Math.round(avg)));
-  }, [budgetWeeks, baseline.count]);
-
-  const changePlanned = (n: number) => {
-    plannedTouched.current = true;
-    setPlannedWorkerDays(n);
-  };
-
   const workerName = useMemo(() => {
     const m: Record<string, string> = {};
     for (const w of workers) m[w.id] = w.name;
@@ -277,8 +188,13 @@ export function ReportsPage() {
     [rows],
   );
 
-  const bataSpent = useMemo(
-    () => bataRows.reduce((s, b) => s + Number(b.spent), 0),
+  const bataGiven = useMemo(
+    () => bataRows.reduce((s, b) => s + Number(b.granted), 0),
+    [bataRows],
+  );
+
+  const bataActivity = useMemo(
+    () => bataRows.filter((b) => Number(b.granted) > 0 || Number(b.spent) > 0),
     [bataRows],
   );
 
@@ -344,68 +260,91 @@ export function ReportsPage() {
         </div>
       </Card>
 
-      <BudgetSection
-        weeks={budgetWeeks}
-        loading={budgetLoading}
-        plannedWorkerDays={plannedWorkerDays}
-        onPlannedChange={changePlanned}
-        baselineWagePerDay={baseline.wagePerDay}
-        baselineBataPerDay={baseline.bataPerDay}
-        baselineWeekCount={baseline.count}
-      />
-
       <div className="grid grid-cols-2 gap-2">
         <Stat label="Gross wages" value={formatINR(totals.gross)} />
         <Stat label="Net payable" value={formatINR(totals.net)} tone="emerald" />
-        <Stat label="Advances + deductions" value={formatINR(totals.advances + totals.deductions)} tone="amber" />
-        <Stat label="Bata (misc)" value={formatINR(bataSpent)} tone="amber" />
+        <Stat
+          label="Advances + deductions"
+          value={formatINR(totals.advances + totals.deductions)}
+          tone="amber"
+        />
+        <Stat label="Bata given" value={formatINR(bataGiven)} tone="amber" />
       </div>
 
-      <div className="flex items-center justify-between gap-2 px-1">
-        <p className="text-sm font-medium text-slate-500">Workers</p>
-        <span className="text-xs text-slate-400">{rows.length}</span>
-      </div>
+      <TrendsSection refreshKey={refreshKey} />
 
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search worker"
-        className={`${inputClass} py-2 text-sm`}
-      />
+      <Section title="Workers" count={rows.length}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search worker"
+          className={`${inputClass} py-2 text-sm`}
+        />
 
-      {loading ? (
-        <Spinner />
-      ) : filteredRows.length === 0 ? (
-        <Card className="p-6 text-center text-sm text-slate-500">
-          {rows.length === 0 ? `No workers for this ${mode}.` : "No worker matches that name."}
-        </Card>
-      ) : (
-        <Card className="divide-y divide-slate-100">
-          {filteredRows.map((r) => (
-            <button
-              key={r.worker_id}
-              onClick={() => setSelectedWorker(r)}
-              className="flex w-full items-center justify-between gap-3 p-3 text-left active:bg-slate-50"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-semibold text-slate-900">
-                  {r.worker_name}
-                  {r.rate_mode === "month" ? (
-                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">monthly</span>
-                  ) : null}
-                </p>
-                <p className="truncate text-xs text-slate-500">
-                  {r.role_name ?? "No role"} · {r.days_present}F · {r.days_half}H · {r.days_absent}A
+        {loading ? (
+          <Spinner />
+        ) : filteredRows.length === 0 ? (
+          <Card className="p-6 text-center text-sm text-slate-500">
+            {rows.length === 0 ? `No workers for this ${mode}.` : "No worker matches that name."}
+          </Card>
+        ) : (
+          <Card className="divide-y divide-slate-100">
+            {filteredRows.map((r) => (
+              <button
+                key={r.worker_id}
+                onClick={() => setSelectedWorker(r)}
+                className="flex w-full items-center justify-between gap-3 p-3 text-left active:bg-slate-50"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-slate-900">
+                    {r.worker_name}
+                    {r.rate_mode === "month" ? (
+                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                        monthly
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">
+                    {r.role_name ?? "No role"} · {r.days_present}F · {r.days_half}H ·{" "}
+                    {r.days_absent}A
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="font-semibold text-slate-900">{formatINR(Number(r.net_pay))}</p>
+                  <p className="text-[11px] text-slate-400">
+                    gross {formatINR(Number(r.gross_pay))}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </Card>
+        )}
+      </Section>
+
+      {bataActivity.length > 0 ? (
+        <Section title="Bata given" count={bataActivity.length}>
+          <Card className="divide-y divide-slate-100">
+            {bataActivity.map((b) => (
+              <div key={b.supervisor_profile_id} className="p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-medium text-slate-800">{b.supervisor_name}</p>
+                  <div className="text-right">
+                    <p className="text-base font-bold text-slate-900">
+                      {formatINR(Number(b.granted))}
+                    </p>
+                    <p className="text-[10px] text-slate-400">given in this {mode}</p>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Spent {formatINR(Number(b.spent))} · Lunch {formatINR(Number(b.lunch))} ·
+                  Travel {formatINR(Number(b.travel))} · Material{" "}
+                  {formatINR(Number(b.material))} · Other {formatINR(Number(b.other))}
                 </p>
               </div>
-              <div className="shrink-0 text-right">
-                <p className="font-semibold text-slate-900">{formatINR(Number(r.net_pay))}</p>
-                <p className="text-[11px] text-slate-400">gross {formatINR(Number(r.gross_pay))}</p>
-              </div>
-            </button>
-          ))}
-        </Card>
-      )}
+            ))}
+          </Card>
+        </Section>
+      ) : null}
 
       {adjustments.length > 0 ? (
         <Section title="Payments" count={adjustments.length}>
@@ -416,7 +355,9 @@ export function ReportsPage() {
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-slate-900">
                       {workerName[a.worker_id] ?? "Worker"}{" "}
-                      <span className="text-xs font-normal text-slate-500">{TYPE_LABEL[a.type]}</span>
+                      <span className="text-xs font-normal text-slate-500">
+                        {TYPE_LABEL[a.type]}
+                      </span>
                     </p>
                     <p className="truncate text-xs text-slate-500">
                       {prettyDate(a.entry_date)}
@@ -424,7 +365,9 @@ export function ReportsPage() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    <span className="font-semibold text-slate-900">{formatINR(Number(a.amount))}</span>
+                    <span className="font-semibold text-slate-900">
+                      {formatINR(Number(a.amount))}
+                    </span>
                     <button
                       onClick={() => setEditingAdjust(a)}
                       className="rounded-lg px-2 py-1 text-xs font-semibold text-brand-700 active:bg-brand-50"
@@ -452,36 +395,16 @@ export function ReportsPage() {
         <Section title="Cost by site" count={locRows.length}>
           <Card className="divide-y divide-slate-100">
             {locRows.map((l) => (
-              <div key={l.location_id ?? "none"} className="flex items-center justify-between p-3">
+              <div
+                key={l.location_id ?? "none"}
+                className="flex items-center justify-between p-3"
+              >
                 <div>
                   <p className="font-medium text-slate-800">{l.location_name}</p>
                   <p className="text-xs text-slate-500">{l.worker_days} worker-days</p>
                 </div>
-                <p className="font-semibold text-slate-900">{formatINR(Number(l.gross_pay))}</p>
-              </div>
-            ))}
-          </Card>
-        </Section>
-      ) : null}
-
-      {bataRows.length > 0 ? (
-        <Section title="Bata (misc)" count={bataRows.length}>
-          <div className="mb-2 flex justify-end">
-            <Button variant="ghost" onClick={() => setGrantOpen(true)}>
-              + Give bata
-            </Button>
-          </div>
-          <Card className="divide-y divide-slate-100">
-            {bataRows.map((b) => (
-              <div key={b.supervisor_profile_id} className="p-3">
-                <div className="flex items-center justify-between">
-                  <p className="font-medium text-slate-800">{b.supervisor_name}</p>
-                  <p className="font-semibold text-slate-900">{formatINR(Number(b.spent))} spent</p>
-                </div>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  given {formatINR(Number(b.granted))} · balance {formatINR(Number(b.balance))} ·
-                  lunch {formatINR(Number(b.lunch))} · travel {formatINR(Number(b.travel))} ·
-                  material {formatINR(Number(b.material))} · other {formatINR(Number(b.other))}
+                <p className="font-semibold text-slate-900">
+                  {formatINR(Number(l.gross_pay))}
                 </p>
               </div>
             ))}
@@ -530,17 +453,6 @@ export function ReportsPage() {
       ) : null}
 
       {summary ? <WeekSummary from={summary.from} to={summary.to} onClose={() => setSummary(null)} /> : null}
-
-      {grantOpen ? (
-        <GrantForm
-          supervisors={bataRows}
-          onClose={() => setGrantOpen(false)}
-          onSaved={() => {
-            setGrantOpen(false);
-            refresh();
-          }}
-        />
-      ) : null}
 
       {todayOpen ? (
         <Modal title={`Today · ${prettyDate(todayISO())}`} onClose={() => setTodayOpen(false)}>
@@ -676,78 +588,6 @@ function Stat({
       <p className="text-[11px] font-medium text-slate-500">{label}</p>
       <p className={`mt-0.5 text-base font-bold ${tones[tone]}`}>{value}</p>
     </Card>
-  );
-}
-
-function GrantForm({
-  supervisors,
-  onClose,
-  onSaved,
-}: {
-  supervisors: BataReportRow[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [profileId, setProfileId] = useState(supervisors[0]?.supervisor_profile_id ?? "");
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(todayISO());
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    const amt = Number(amount);
-    if (!profileId) {
-      setError("Pick a supervisor.");
-      return;
-    }
-    if (!Number.isFinite(amt) || amt <= 0) {
-      setError("Enter an amount.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await insertRow("bata_grants", {
-        supervisor_profile_id: profileId,
-        grant_date: date,
-        amount: amt,
-        note: note.trim() || null,
-      });
-      onSaved();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save");
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal title="Give bata cash" onClose={onClose}>
-      <div className="space-y-4">
-        <Field label="Supervisor">
-          <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className={inputClass}>
-            {supervisors.map((s) => (
-              <option key={s.supervisor_profile_id} value={s.supervisor_profile_id}>
-                {s.supervisor_name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Amount (₹)">
-          <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className={inputClass} placeholder="0" />
-        </Field>
-        <Field label="Date">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} />
-        </Field>
-        <Field label="Note (optional)">
-          <input value={note} onChange={(e) => setNote(e.target.value)} className={inputClass} placeholder="e.g. weekly cash" />
-        </Field>
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <Button onClick={save} disabled={busy} className="w-full">
-          {busy ? "Saving…" : "Save"}
-        </Button>
-      </div>
-    </Modal>
   );
 }
 

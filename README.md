@@ -19,16 +19,18 @@ No app to install — it's just a website; add it to the home screen if you like
   prompted to set that worker's rate, and the worker shows **who added them**.
 - Day-rate **and** month-rate workers. Each worker uses their **role's base rate** (Plumber ₹1,000/day,
   Mason ₹1,200/day, etc.) unless a custom rate is set for that person; changing a role rate updates
-  everyone without a custom rate. Reports, Today and the budget all use the same effective rate.
-- **Bata**: owner hands cash to a supervisor; the supervisor records the breakdown (lunch, travel/tempo,
-  material, other) and the owner sees it in reports as a separate "misc" line.
+  everyone without a custom rate. Reports and Today all use the same effective rate.
+- **Bata**: owner gives cash to a supervisor from Home; the supervisor records the breakdown (lunch,
+  travel/tempo, material, other), and Reports shows bata given per supervisor with their spending
+  breakdown.
 - **Reports**: live current week, a week list with tap-to-view summaries, and a monthly view that
   includes monthly-salaried workers. A **Today's summary** popup shows today's total wages, the
-  headcount by site, and a per-worker breakdown. Workers are a compact searchable list; tap one to open
-  a bottom sheet with a **week strip and month calendar** of attendance, wages for the selected range,
-  and the last six months at a glance. A **Budget & trend** card compares the last eight weeks (wages
-  plus bata by lunch/travel/material/other) against a provisional baseline, with a ₹ / per-worker-day
-  toggle. Payments, cost by site, bata and past weeks are collapsible sections, and a **legend** explains
+  headcount by site, and a per-worker breakdown. **Workers** is a collapsible searchable list; tap one
+  to open a bottom sheet with a **week strip and month calendar** of attendance, wages for the selected
+  range, and the last six months at a glance. **Trends** is a collapsed section showing a single bar per
+  week for total money spent (wages + bata); tap a bar for that week's wages, bata and total. **Bata
+  given** shows the cash given to each supervisor for the selected week or month, with their spending
+  breakdown. Payments, cost by site and past weeks are collapsible sections, and a **legend** explains
   every number. Advances / deductions / bonuses are editable from a list.
 - Owner home shows the **on-site count**, **cash out today** (workers + bata given), the **bata
   unaccounted** (given today but not yet recorded as spent), and a card for every active supervisor
