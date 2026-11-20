@@ -27,7 +27,8 @@ const STATUS_PILL: Record<AttendanceStatus, string> = {
 
 type DayCost = {
   wages: number;
-  bata: number;
+  bataGiven: number;
+  bataSpent: number;
 };
 
 type SupervisorInfo = { id: string; name: string };
@@ -35,7 +36,7 @@ type SupervisorInfo = { id: string; name: string };
 export function HomePage() {
   const [date, setDate] = useState(todayISO());
   const [rows, setRows] = useState<DayAttendanceRow[]>([]);
-  const [cost, setCost] = useState<DayCost>({ wages: 0, bata: 0 });
+  const [cost, setCost] = useState<DayCost>({ wages: 0, bataGiven: 0, bataSpent: 0 });
   const [bataRows, setBataRows] = useState<BataReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [givingTo, setGivingTo] = useState<SupervisorInfo | null>(null);
@@ -63,7 +64,8 @@ export function HomePage() {
       setBataRows(b);
       setCost({
         wages,
-        bata: b.reduce((s, x) => s + Number(x.spent), 0),
+        bataGiven: b.reduce((sum, x) => sum + Number(x.granted), 0),
+        bataSpent: b.reduce((sum, x) => sum + Number(x.spent), 0),
       });
     } finally {
       if (seq === loadSeq.current) setLoading(false);
@@ -128,6 +130,7 @@ export function HomePage() {
   }, [profiles, bataRows]);
 
   const isToday = date === todayISO();
+  const bataUnaccounted = Math.max(0, cost.bataGiven - cost.bataSpent);
 
   return (
     <div className="space-y-4">
@@ -175,11 +178,12 @@ export function HomePage() {
 
           <Card className="p-4">
             <p className="text-sm font-medium text-slate-500">
-              {isToday ? "Spent today" : "Cost for the day"}
+              {isToday ? "Cash out today" : "Cash out for the day"}
             </p>
             <p className="mt-1 text-3xl font-bold text-slate-900">
-              {formatINR(cost.wages + cost.bata)}
+              {formatINR(cost.wages + cost.bataGiven)}
             </p>
+            <p className="text-xs text-slate-400">Workers + bata given</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <div className="rounded-xl bg-slate-50 p-3">
                 <p className="text-xs font-medium text-slate-500">Workers</p>
@@ -187,10 +191,44 @@ export function HomePage() {
                   {formatINR(cost.wages)}
                 </p>
               </div>
-              <div className="rounded-xl bg-slate-50 p-3">
-                <p className="text-xs font-medium text-slate-500">Bata (site cash)</p>
-                <p className="mt-0.5 text-lg font-bold text-slate-900">
-                  {formatINR(cost.bata)}
+              <div className="rounded-xl bg-emerald-50/80 p-3">
+                <p className="text-xs font-medium text-emerald-700">Bata given</p>
+                <p className="mt-0.5 text-lg font-bold text-emerald-800">
+                  {formatINR(cost.bataGiven)}
+                </p>
+                <p className="text-[10px] text-emerald-700">
+                  {formatINR(cost.bataSpent)} recorded as spent
+                </p>
+              </div>
+              <div
+                className={`col-span-2 rounded-xl p-3 ${
+                  bataUnaccounted > 0 ? "bg-amber-50" : "bg-slate-50"
+                }`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <p
+                    className={`text-xs font-semibold ${
+                      bataUnaccounted > 0 ? "text-amber-800" : "text-slate-500"
+                    }`}
+                  >
+                    Bata unaccounted
+                  </p>
+                  <p
+                    className={`text-lg font-bold ${
+                      bataUnaccounted > 0 ? "text-amber-900" : "text-slate-700"
+                    }`}
+                  >
+                    {formatINR(bataUnaccounted)}
+                  </p>
+                </div>
+                <p
+                  className={`mt-0.5 text-[11px] ${
+                    bataUnaccounted > 0 ? "text-amber-700" : "text-slate-400"
+                  }`}
+                >
+                  {bataUnaccounted > 0
+                    ? "Bata given today that has not been recorded as spent."
+                    : "No bata given today is unaccounted."}
                 </p>
               </div>
             </div>

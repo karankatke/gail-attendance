@@ -30,11 +30,11 @@ No app to install — it's just a website; add it to the home screen if you like
   plus bata by lunch/travel/material/other) against a provisional baseline, with a ₹ / per-worker-day
   toggle. Payments, cost by site, bata and past weeks are collapsible sections, and a **legend** explains
   every number. Advances / deductions / bonuses are editable from a list.
-- Owner home shows the **on-site count**, today's **cost** (workers + bata), and a card for every
-  active supervisor with **bata given today**, **spent today** and the lunch/travel/material/other
-  split. Each supervisor card has **Give bata**, so cash can be recorded from Home without opening
-  Reports. Below that, only the sites marked for the day are listed, with each worker and who marked
-  them. Bata is also **split by supervisor**, so you can see how much site cash each one spent.
+- Owner home shows the **on-site count**, **cash out today** (workers + bata given), the **bata
+  unaccounted** (given today but not yet recorded as spent), and a card for every active supervisor
+  with **bata given today**, **spent today** and the lunch/travel/material/other split. Each
+  supervisor card has **Give bata**, so cash can be recorded from Home without opening Reports.
+  Below that, only the sites marked for the day are listed, with each worker and who marked them.
 - **Meter details**: per flat (from a pre-loaded flat list) a supervisor captures the **meter number**
   (free text, exactly as printed) and **initial meter reading**, meter make, work date, remarks and two
   photos (meter, stove) — each photo can be taken with the camera or uploaded from the gallery — sees a
